@@ -1,0 +1,121 @@
+diff --git a/django/db/migrations/autodetector.py b/django/db/migrations/autodetector.py
+index 5f41053..a222757 100644
+--- a/django/db/migrations/autodetector.py
++++ b/django/db/migrations/autodetector.py
+@@ -1020,10 +1020,12 @@ class MigrationAutodetector:
+         ):
+             self._generate_added_field(app_label, model_name, field_name)
+ 
+-    def _generate_added_field(self, app_label, model_name, field_name):
++    def _generate_added_field(
++        self, app_label, model_name, field_name, dependencies=None
++    ):
+         field = self.to_state.models[app_label, model_name].get_field(field_name)
+         # Fields that are foreignkeys/m2ms depend on stuff
+-        dependencies = []
++        dependencies = dependencies or []
+         if field.remote_field and field.remote_field.model:
+             dependencies.extend(
+                 self._get_dependencies_for_foreign_key(
+@@ -1210,7 +1212,16 @@ class MigrationAutodetector:
+                 else:
+                     # We cannot alter between m2m and concrete fields
+                     self._generate_removed_field(app_label, model_name, field_name)
+-                    self._generate_added_field(app_label, model_name, field_name)
++                    self._generate_added_field(
++                        app_label,
++                        model_name,
++                        field_name,
++                        dependencies=(
++                            [(app_label, model_name, field_name, False)]
++                            if new_field.many_to_many
++                            else None
++                        ),
++                    )
+ 
+     def create_altered_indexes(self):
+         option_name = operations.AddIndex.option_name
+diff --git a/tests/migrations/test_autodetector.py b/tests/migrations/test_autodetector.py
+index 547e0b3..8c91282 100644
+--- a/tests/migrations/test_autodetector.py
++++ b/tests/migrations/test_autodetector.py
+@@ -3050,6 +3050,79 @@ class AutodetectorTests(TestCase):
+             index_together={("age",)},
+         )
+ 
++    def test_fk_to_m2m_removes_unique_together(self):
++        app_label = "test_fk_to_m2m"
++        project_data_set = ModelState(
++            app_label,
++            "ProjectDataSet",
++            [("id", models.AutoField(primary_key=True))],
++        )
++        authors = ModelState(
++            app_label,
++            "Authors",
++            [
++                ("id", models.AutoField(primary_key=True)),
++                (
++                    "project_data_set",
++                    models.ForeignKey("test_fk_to_m2m.ProjectDataSet", models.CASCADE),
++                ),
++                ("state", models.CharField(max_length=2)),
++                ("start_date", models.DateField()),
++            ],
++            {
++                "unique_together": {
++                    ("project_data_set", "state", "start_date"),
++                },
++            },
++        )
++        authors_with_m2m = ModelState(
++            app_label,
++            "Authors",
++            [
++                ("id", models.AutoField(primary_key=True)),
++                (
++                    "project_data_set",
++                    models.ManyToManyField("test_fk_to_m2m.ProjectDataSet"),
++                ),
++                ("state", models.CharField(max_length=2)),
++                ("start_date", models.DateField()),
++            ],
++        )
++        before = [project_data_set, authors]
++        after = [project_data_set, authors_with_m2m]
++        changes = self.get_changes(before, after)
++
++        self.assertNumberMigrations(changes, app_label, 1)
++        self.assertOperationTypes(
++            changes,
++            app_label,
++            0,
++            ["AlterUniqueTogether", "RemoveField", "AddField"],
++        )
++
++        from_state = self.make_project_state(before)
++        schema_editor = mock.Mock()
++        schema_editor.connection = connection
++        schema_editor.atomic_migration = True
++
++        def assert_old_unique_together_model(model, old_together, new_together):
++            field = model._meta.get_field("project_data_set")
++            self.assertIsInstance(field, models.ForeignKey)
++            self.assertEqual(field.column, "project_data_set_id")
++            self.assertEqual(
++                old_together, {("project_data_set", "state", "start_date")}
++            )
++            self.assertEqual(new_together, ())
++
++        schema_editor.alter_unique_together.side_effect = (
++            assert_old_unique_together_model
++        )
++        changes[app_label][0].apply(from_state.clone(), schema_editor)
++        self.assertEqual(
++            [call[0] for call in schema_editor.method_calls],
++            ["alter_unique_together", "remove_field", "add_field"],
++        )
++
+     def test_partly_alter_foo_together(self):
+         initial_author = ModelState(
+             "testapp",

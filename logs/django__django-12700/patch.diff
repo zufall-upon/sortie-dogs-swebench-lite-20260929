@@ -1,0 +1,133 @@
+diff --git a/django/views/debug.py b/django/views/debug.py
+index e6b7d4d..9d32b37 100644
+--- a/django/views/debug.py
++++ b/django/views/debug.py
+@@ -2,6 +2,8 @@ import functools
+ import re
+ import sys
+ import types
++from collections import deque
++from collections.abc import Collection, Mapping
+ from pathlib import Path
+ 
+ from django.conf import settings
+@@ -83,13 +85,42 @@ class SafeExceptionReporterFilter:
+     def cleanse_setting(self, key, value):
+         """
+         Cleanse an individual setting key/value of sensitive content. If the
+-        value is a dictionary, recursively cleanse the keys in that dictionary.
++        value is a mapping or collection, recursively cleanse its contents.
+         """
+         try:
+             if self.hidden_settings.search(key):
+                 cleansed = self.cleansed_substitute
+-            elif isinstance(value, dict):
++            elif isinstance(value, Mapping):
+                 cleansed = {k: self.cleanse_setting(k, v) for k, v in value.items()}
++                if not isinstance(value, dict):
++                    try:
++                        cleansed = type(value)(cleansed)
++                    except TypeError:
++                        pass
++            elif isinstance(value, deque):
++                values = [self.cleanse_setting(key, v) for v in value]
++                try:
++                    cleansed = type(value)(values, maxlen=value.maxlen)
++                except TypeError:
++                    cleansed = deque(values, maxlen=value.maxlen)
++            elif isinstance(value, (list, tuple)):
++                values = [self.cleanse_setting(key, v) for v in value]
++                if isinstance(value, tuple) and hasattr(value, '_fields'):
++                    try:
++                        cleansed = type(value)(*values)
++                    except TypeError:
++                        cleansed = tuple(values)
++                else:
++                    try:
++                        cleansed = type(value)(values)
++                    except TypeError:
++                        cleansed = list(values) if isinstance(value, list) else tuple(values)
++            elif isinstance(value, Collection) and not isinstance(value, (str, bytes, bytearray, memoryview)):
++                values = [self.cleanse_setting(key, v) for v in value]
++                try:
++                    cleansed = type(value)(values)
++                except TypeError:
++                    cleansed = values
+             else:
+                 cleansed = value
+         except TypeError:
+diff --git a/tests/view_tests/tests/test_debug.py b/tests/view_tests/tests/test_debug.py
+index 8c64bc3..42f8718 100644
+--- a/tests/view_tests/tests/test_debug.py
++++ b/tests/view_tests/tests/test_debug.py
+@@ -5,6 +5,7 @@ import re
+ import sys
+ import tempfile
+ import threading
++from collections import UserDict, UserList, deque, namedtuple
+ from io import StringIO
+ from pathlib import Path
+ from unittest import mock
+@@ -1249,6 +1250,62 @@ class ExceptionReporterFilterTests(ExceptionReportTestMixin, LoggingCaptureMixin
+             {'login': 'cooper', 'password': reporter_filter.cleansed_substitute},
+         )
+ 
++    def test_cleanse_setting_recurses_in_iterables(self):
++        reporter_filter = SafeExceptionReporterFilter()
++        initial = [[{'login': 'cooper', 'password': 'secret'}], ({'password': 'secret'},)]
++        self.assertEqual(
++            reporter_filter.cleanse_setting('SETTING_NAME', initial),
++            [
++                [{'login': 'cooper', 'password': reporter_filter.cleansed_substitute}],
++                ({'password': reporter_filter.cleansed_substitute},),
++            ],
++        )
++
++        Pair = namedtuple('Pair', 'a b')
++
++        class TupleWithBrokenConstructor(tuple):
++            def __new__(cls, values):
++                raise TypeError('constructor unavailable')
++
++        original = tuple.__new__(TupleWithBrokenConstructor, ({'secret': 'value'},))
++        with self.settings(
++            MY_SETTING=deque([{'secret': 'value'}]),
++            PAIR_SETTING=Pair({'secret': 'value'}, 0),
++            BROKEN_SETTING=original,
++        ):
++            safe_settings = reporter_filter.get_safe_settings()
++        self.assertEqual(
++            safe_settings['MY_SETTING'],
++            deque([{'secret': reporter_filter.cleansed_substitute}]),
++        )
++        self.assertEqual(
++            safe_settings['PAIR_SETTING'],
++            Pair({'secret': reporter_filter.cleansed_substitute}, 0),
++        )
++        self.assertEqual(
++            safe_settings['BROKEN_SETTING'],
++            ({'secret': reporter_filter.cleansed_substitute},),
++        )
++        self.assertEqual(original[0], {'secret': 'value'})
++
++        with self.settings(
++            MY_SETTING=UserList([{'secret': 'value'}]),
++            USER_MAPPING_SETTING=UserDict({'secret': 'value'}),
++        ):
++            safe_settings = reporter_filter.get_safe_settings()
++        self.assertEqual(
++            safe_settings['MY_SETTING'][0]['secret'],
++            reporter_filter.cleansed_substitute,
++        )
++        self.assertEqual(
++            safe_settings['USER_MAPPING_SETTING']['secret'],
++            reporter_filter.cleansed_substitute,
++        )
++
++        iterator = iter([{'password': 'secret'}])
++        self.assertIs(reporter_filter.cleanse_setting('SETTING_NAME', iterator), iterator)
++        self.assertEqual(next(iterator), {'password': 'secret'})
++
+     def test_request_meta_filtering(self):
+         request = self.rf.get('/', HTTP_SECRET_HEADER='super_secret')
+         reporter_filter = SafeExceptionReporterFilter()

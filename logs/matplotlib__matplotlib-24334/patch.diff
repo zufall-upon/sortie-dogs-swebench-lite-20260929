@@ -1,0 +1,40 @@
+diff --git a/lib/matplotlib/axis.py b/lib/matplotlib/axis.py
+index af0815d..e1c5336 100644
+--- a/lib/matplotlib/axis.py
++++ b/lib/matplotlib/axis.py
+@@ -2024,6 +2024,8 @@ class Axis(martist.Artist):
+         result = self._set_tick_locations(ticks, minor=minor)
+         if labels is not None:
+             self.set_ticklabels(labels, minor=minor, **kwargs)
++        elif kwargs:
++            mtext.Text()._internal_update(kwargs)
+         return result
+ 
+     def _get_tick_boxes_siblings(self, renderer):
+diff --git a/lib/matplotlib/tests/test_axes.py b/lib/matplotlib/tests/test_axes.py
+index 3699c9d..0d809f6 100644
+--- a/lib/matplotlib/tests/test_axes.py
++++ b/lib/matplotlib/tests/test_axes.py
+@@ -5754,6 +5754,22 @@ def test_set_ticks_with_labels(fig_test, fig_ref):
+     ax.set_yticks([2, 4], ['A', 'B'], minor=True)
+ 
+ 
++def test_set_ticks_kwargs_without_labels():
++    fig, ax = plt.subplots()
++    with pytest.raises(AttributeError, match="xticklabels"):
++        ax.set_xticks([0, 1], xticklabels=['a', 'b'])
++    assert list(ax.get_xticks()) == [0, 1]
++
++    with pytest.raises(ValueError):
++        ax.set_xticks([2, 4], color='not-a-color')
++    assert list(ax.get_xticks()) == [2, 4]
++
++    ticklabel = ax.xaxis.get_major_ticks()[0].label1
++    color = ticklabel.get_color()
++    ax.set_xticks([2, 4], color='red')
++    assert ticklabel.get_color() == color
++
++
+ def test_set_noniterable_ticklabels():
+     # Ensure a useful TypeError message is raised
+     # when given a non-iterable ticklabels argument

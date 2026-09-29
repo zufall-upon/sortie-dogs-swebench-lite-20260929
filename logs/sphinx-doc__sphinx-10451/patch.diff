@@ -1,0 +1,199 @@
+diff --git a/sphinx/ext/autodoc/typehints.py b/sphinx/ext/autodoc/typehints.py
+index d912cd7..2df74b5 100644
+--- a/sphinx/ext/autodoc/typehints.py
++++ b/sphinx/ext/autodoc/typehints.py
+@@ -27,7 +27,13 @@ def record_typehints(app: Sphinx, objtype: str, name: str, obj: Any,
+             sig = inspect.signature(obj, type_aliases=app.config.autodoc_type_aliases)
+             for param in sig.parameters.values():
+                 if param.annotation is not param.empty:
+-                    annotation[param.name] = typing.stringify(param.annotation, mode)
++                    if param.kind == param.VAR_POSITIONAL:
++                        param_name = '*' + param.name
++                    elif param.kind == param.VAR_KEYWORD:
++                        param_name = '**' + param.name
++                    else:
++                        param_name = param.name
++                    annotation[param_name] = typing.stringify(param.annotation, mode)
+             if sig.return_annotation is not sig.empty:
+                 annotation['return'] = typing.stringify(sig.return_annotation, mode)
+     except (TypeError, ValueError):
+@@ -86,6 +92,14 @@ def insert_field_list(node: Element) -> nodes.field_list:
+     return field_list
+ 
+ 
++def _get_field_name(name: str, field_names: Iterable[str]) -> str:
++    if name not in field_names and name.startswith('*'):
++        unstarred_name = name.lstrip('*')
++        if unstarred_name in field_names:
++            return unstarred_name
++    return name
++
++
+ def modify_field_list(node: nodes.field_list, annotations: Dict[str, str],
+                       suppress_rtype: bool = False) -> None:
+     arguments: Dict[str, Dict[str, bool]] = {}
+@@ -111,19 +125,23 @@ def modify_field_list(node: nodes.field_list, annotations: Dict[str, str],
+         elif parts[0] == 'rtype':
+             arguments['return'] = {'type': True}
+ 
++    documented_arguments = {name for name, arg in arguments.items() if arg.get('param')}
+     for name, annotation in annotations.items():
+         if name == 'return':
+             continue
+ 
+-        arg = arguments.get(name, {})
++        field_name = _get_field_name(name, documented_arguments)
++        if field_name == name:
++            field_name = _get_field_name(name, arguments)
++        arg = arguments.get(field_name, {})
+         if not arg.get('type'):
+             field = nodes.field()
+-            field += nodes.field_name('', 'type ' + name)
++            field += nodes.field_name('', 'type ' + field_name)
+             field += nodes.field_body('', nodes.paragraph('', annotation))
+             node += field
+         if not arg.get('param'):
+             field = nodes.field()
+-            field += nodes.field_name('', 'param ' + name)
++            field += nodes.field_name('', 'param ' + field_name)
+             field += nodes.field_body('', nodes.paragraph('', ''))
+             node += field
+ 
+@@ -170,9 +188,10 @@ def augment_descriptions_with_types(
+     for name in annotations:
+         if name in ('return', 'returns'):
+             continue
+-        if name in has_description and name not in has_type:
++        field_name = _get_field_name(name, has_description)
++        if field_name in has_description and field_name not in has_type:
+             field = nodes.field()
+-            field += nodes.field_name('', 'type ' + name)
++            field += nodes.field_name('', 'type ' + field_name)
+             field += nodes.field_body('', nodes.paragraph('', annotations[name]))
+             node += field
+ 
+diff --git a/tests/roots/test-ext-autodoc/target/typehints.py b/tests/roots/test-ext-autodoc/target/typehints.py
+index 6b0d614..804d98d 100644
+--- a/tests/roots/test-ext-autodoc/target/typehints.py
++++ b/tests/roots/test-ext-autodoc/target/typehints.py
+@@ -99,3 +99,33 @@ class _ClassWithDocumentedInit:
+ 
+         :param x: Some integer
+         """
++
++
++class _ClassWithDocumentedInitAndStarArgs:
++    """Class docstring."""
++
++    def __init__(self, x: int, *args: int, **kwargs: int) -> None:
++        """Init docstring.
++
++        :param x: Some integer
++        :param *args: Some integer
++        :param **kwargs: Some integer
++        """
++
++
++def documented_unstarred_varargs(*args: int, **kwargs: int) -> None:
++    """Docstring.
++
++    :param args: Some integer
++    :param kwargs: Some integer
++    """
++
++
++def documented_mixed_vararg_fields(*args: int, **kwargs: str) -> None:
++    """Docstring.
++
++    :param args: Some integer
++    :type *args: int
++    :param **kwargs: Some string
++    :type kwargs: str
++    """
+diff --git a/tests/test_ext_autodoc_configs.py b/tests/test_ext_autodoc_configs.py
+index c075a8e..ba8f44b 100644
+--- a/tests/test_ext_autodoc_configs.py
++++ b/tests/test_ext_autodoc_configs.py
+@@ -1052,6 +1052,82 @@ def test_autodoc_typehints_description_with_documented_init(app):
+             '         None\n' == context)
+ 
+ 
++@pytest.mark.sphinx('text', testroot='ext-autodoc',
++                    confoverrides={'autodoc_typehints': "description"})
++def test_autodoc_typehints_description_with_documented_init_and_star_args(app):
++    (app.srcdir / 'index.rst').write_text(
++        '.. autoclass:: target.typehints._ClassWithDocumentedInitAndStarArgs\n'
++        '   :special-members: __init__\n',
++        encoding='utf8'
++    )
++    app.build()
++    context = (app.outdir / 'index.txt').read_text(encoding='utf8')
++    assert ('class target.typehints._ClassWithDocumentedInitAndStarArgs(x, *args, **kwargs)\n'
++            '\n'
++            '   Class docstring.\n'
++            '\n'
++            '   Parameters:\n'
++            '      * **x** (*int*) --\n'
++            '\n'
++            '      * ***args** (*int*) --\n'
++            '\n'
++            '      * ****kwargs** (*int*) --\n'
++            '\n'
++            '   __init__(x, *args, **kwargs)\n'
++            '\n'
++            '      Init docstring.\n'
++            '\n'
++            '      Parameters:\n'
++            '         * **x** (*int*) -- Some integer\n'
++            '\n'
++            '         * ***args** (*int*) --\n'
++            '\n'
++            '           Some integer\n'
++            '\n'
++            '         * ****kwargs** (*int*) --\n'
++            '\n'
++            '           Some integer\n'
++            '\n'
++            '      Return type:\n'
++            '         None\n' == context)
++
++
++@pytest.mark.parametrize('target', [None, 'documented', 'documented_params'])
++@pytest.mark.sphinx('text', testroot='ext-autodoc',
++                    confoverrides={'autodoc_typehints': "description"})
++def test_autodoc_typehints_description_with_unstarred_varargs(app, target):
++    if target is not None:
++        app.config.autodoc_typehints_description_target = target
++
++    (app.srcdir / 'index.rst').write_text(
++        '.. autofunction:: target.typehints.documented_unstarred_varargs\n',
++        encoding='utf8'
++    )
++    app.build()
++    context = (app.outdir / 'index.txt').read_text(encoding='utf8')
++    assert context.count('**args** (*int*) -- Some integer') == 1
++    assert context.count('**kwargs** (*int*) -- Some integer') == 1
++    assert '***args**' not in context
++    assert '****kwargs**' not in context
++
++
++@pytest.mark.sphinx('text', testroot='ext-autodoc',
++                    confoverrides={'autodoc_typehints': "description"})
++def test_autodoc_typehints_description_with_mixed_vararg_fields(app):
++    assert app.config.autodoc_typehints_description_target == 'all'
++    (app.srcdir / 'index.rst').write_text(
++        '.. autofunction:: target.typehints.documented_mixed_vararg_fields\n',
++        encoding='utf8'
++    )
++    app.build()
++    context = (app.outdir / 'index.txt').read_text(encoding='utf8')
++    assert context.count('* **args** (*int*) -- Some integer') == 1
++    assert context.count('* ****kwargs** (*str*) --') == 1
++    assert context.count('Some string') == 1
++    assert '* ***args**' not in context
++    assert '* **kwargs** (*str*)' not in context
++
++
+ @pytest.mark.sphinx('text', testroot='ext-autodoc',
+                     confoverrides={'autodoc_typehints': "description",
+                                    'autodoc_typehints_description_target': 'documented'})

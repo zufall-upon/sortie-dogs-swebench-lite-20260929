@@ -1,0 +1,44 @@
+diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py
+index 7bc96e6..d199ee8 100644
+--- a/sympy/core/numbers.py
++++ b/sympy/core/numbers.py
+@@ -1042,7 +1042,7 @@ def __new__(cls, num, dps=None, prec=None, precision=None):
+                 # it's a hexadecimal (coming from a pickled object)
+                 # assume that it is in standard form
+                 num = list(num)
+-                num[1] = long(num[1], 16)
++                num[1] = long(num[1].rstrip('L'), 16)
+                 _mpf_ = tuple(num)
+             else:
+                 if len(num) == 4:
+diff --git a/sympy/utilities/tests/test_pickling.py b/sympy/utilities/tests/test_pickling.py
+index a28503e..65df48d 100644
+--- a/sympy/utilities/tests/test_pickling.py
++++ b/sympy/utilities/tests/test_pickling.py
+@@ -105,6 +105,26 @@ def test_core_numbers():
+         check(c)
+ 
+ 
++def test_core_numbers_python2_float_pickle():
++    # Python 2 serializes the hexadecimal mantissa of an mpf with a trailing L.
++    if sys.version_info[0] < 3:
++        return
++
++    x = Symbol('x')
++    expr = x + 1.0
++    payload = pickle.dumps(expr, protocol=2)
++    old = b'X\x01\x00\x00\x001'
++    assert payload.count(old) == 1
++    py2_payload = payload.replace(old, b'X\x02\x00\x00\x001L')
++
++    result = pickle.loads(py2_payload)
++    assert result == expr
++    result_float = next(iter(result.atoms(Float)))
++    expr_float = next(iter(expr.atoms(Float)))
++    assert result_float._mpf_ == expr_float._mpf_
++    assert result_float._prec == expr_float._prec
++
++
+ def test_core_relational():
+     x = Symbol("x")
+     y = Symbol("y")

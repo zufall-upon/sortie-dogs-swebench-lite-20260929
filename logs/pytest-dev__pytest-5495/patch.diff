@@ -1,0 +1,83 @@
+diff --git a/src/_pytest/assertion/util.py b/src/_pytest/assertion/util.py
+index 762e576..18cf5f1 100644
+--- a/src/_pytest/assertion/util.py
++++ b/src/_pytest/assertion/util.py
+@@ -82,11 +82,11 @@ def _format_lines(lines):
+ 
+ 
+ def issequence(x):
+-    return isinstance(x, Sequence) and not isinstance(x, str)
++    return isinstance(x, Sequence) and not isinstance(x, (str, bytes))
+ 
+ 
+ def istext(x):
+-    return isinstance(x, str)
++    return isinstance(x, (str, bytes))
+ 
+ 
+ def isdict(x):
+@@ -181,7 +181,10 @@ def _diff_text(left, right, verbose=0):
+         This is done using repr() which then needs post-processing to fix the encompassing quotes and un-escape
+         newlines and carriage returns (#429).
+         """
+-        r = str(repr(binary_text)[1:-1])
++        binary_repr = repr(binary_text)
++        if binary_repr.startswith("b"):
++            binary_repr = binary_repr[1:]
++        r = str(binary_repr[1:-1])
+         r = r.replace(r"\n", "\n")
+         r = r.replace(r"\r", "\r")
+         return r
+diff --git a/testing/test_assertion.py b/testing/test_assertion.py
+index 0fcfd9f..20bfdf0 100644
+--- a/testing/test_assertion.py
++++ b/testing/test_assertion.py
+@@ -313,6 +313,18 @@ class TestAssert_reprcompare:
+         assert "- spam" in diff
+         assert "+ eggs" in diff
+ 
++    @pytest.mark.parametrize(
++        ["left", "right", "expected"],
++        [
++            (b"", b"42", ["+ 42"]),
++            (b"", b"1", ["+ 1"]),
++            (b"spam", b"eggs", ["- spam", "+ eggs"]),
++            (b"e", b"\xc3\xa9", ["- e", r"+ \xc3\xa9"]),
++        ],
++    )
++    def test_bytes_diff(self, left, right, expected):
++        assert callequal(left, right)[1:] == expected
++
+     def test_text_skipping(self):
+         lines = callequal("a" * 50 + "spam", "a" * 50 + "eggs")
+         assert "Skipping" in lines[1]
+diff --git a/testing/test_bytes_public_repro.py b/testing/test_bytes_public_repro.py
+new file mode 100644
+index 0000000..7a40d36
+--- /dev/null
++++ b/testing/test_bytes_public_repro.py
+@@ -0,0 +1,24 @@
++import pytest
++
++pytest_plugins = ["pytester"]
++
++
++@pytest.mark.parametrize("right", [b"42", b"1"])
++def test_empty_bytes_assertion_explanation(testdir, right):
++    testdir.makepyfile(
++        """
++        def test_bytes():
++            assert b'' == {right!r}
++        """.format(right=right)
++    )
++    result = testdir.runpytest("--assert=rewrite")
++    result.assert_outcomes(failed=1)
++    output = result.stdout.str()
++    expected_lines = [
++        "E       AssertionError: assert b'' == {!r}".format(right),
++        "E         + {}".format(right.decode("ascii")),
++    ]
++    for line in expected_lines:
++        assert line in result.stdout.lines
++    assert "At index " not in output
++    assert "contains one more item" not in output

@@ -1,0 +1,227 @@
+diff --git a/requests/models.py b/requests/models.py
+index fbb3c7e..046566b 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -27,7 +27,8 @@ from .exceptions import (
+ from .utils import (
+     guess_filename, get_auth_from_url, requote_uri,
+     stream_decode_response_unicode, to_key_val_list, parse_header_links,
+-    iter_slices, guess_json_utf, super_len, to_native_string)
++    iter_slices, guess_json_utf, super_len, to_native_string,
++    _get_json_encoding_from_headers)
+ from .compat import (
+     cookielib, urlunparse, urlsplit, urlencode, str, bytes, StringIO,
+     is_py2, chardet, builtin_str, basestring)
+@@ -776,7 +777,8 @@ class Response(object):
+ 
+         # Fallback to auto-detected encoding.
+         if self.encoding is None:
+-            encoding = self.apparent_encoding
++            encoding = (_get_json_encoding_from_headers(self.headers) or
++                        self.apparent_encoding)
+ 
+         # Decode unicode from given encoding.
+         try:
+diff --git a/requests/utils.py b/requests/utils.py
+index 8d17b6b..4c0bb6e 100644
+--- a/requests/utils.py
++++ b/requests/utils.py
+@@ -356,15 +356,32 @@ def get_encoding_from_headers(headers):
+         return 'ISO-8859-1'
+ 
+ 
++def _get_json_encoding_from_headers(headers):
++    """Returns UTF-8 for JSON headers without a declared charset."""
++
++    content_type = headers.get('content-type')
++    if not content_type:
++        return None
++
++    content_type, params = cgi.parse_header(content_type)
++    if (content_type.lower() == 'application/json' and
++            'charset' not in params):
++        return 'utf-8'
++
++
+ def stream_decode_response_unicode(iterator, r):
+     """Stream decodes a iterator."""
+ 
+-    if r.encoding is None:
++    encoding = r.encoding
++    if encoding is None:
++        encoding = _get_json_encoding_from_headers(r.headers)
++
++    if encoding is None:
+         for item in iterator:
+             yield item
+         return
+ 
+-    decoder = codecs.getincrementaldecoder(r.encoding)(errors='replace')
++    decoder = codecs.getincrementaldecoder(encoding)(errors='replace')
+     for chunk in iterator:
+         rv = decoder.decode(chunk)
+         if rv:
+diff --git a/tests/test_requests.py b/tests/test_requests.py
+index d2a2714..21fd73f 100755
+--- a/tests/test_requests.py
++++ b/tests/test_requests.py
+@@ -32,6 +32,7 @@ from requests.hooks import default_hooks
+ 
+ from .compat import StringIO, u
+ from .utils import override_environ
++from requests.utils import get_encoding_from_headers
+ 
+ # Requests to this URL should always fail with a connection timeout (nothing
+ # listening on that port)
+@@ -980,6 +981,120 @@ class TestRequests:
+         chunks = r.iter_content(decode_unicode=True)
+         assert all(isinstance(chunk, str) for chunk in chunks)
+ 
++    @pytest.mark.parametrize('streamed', [True, False])
++    def test_response_decode_unicode_json_without_charset(self, streamed):
++        content = b'{"message":"caf\xc3\xa9"}'
++        r = requests.Response()
++        r.headers['Content-Type'] = 'application/json'
++        r.encoding = get_encoding_from_headers(r.headers)
++
++        if streamed:
++            r.raw = io.BytesIO(content)
++        else:
++            r._content = content
++            r._content_consumed = True
++
++        chunks = list(r.iter_content(16384, decode_unicode=True))
++
++        text_response = requests.Response()
++        text_response.headers['Content-Type'] = 'application/json'
++        text_response.encoding = get_encoding_from_headers(text_response.headers)
++        text_response._content = content
++        text_response._content_consumed = True
++
++        assert isinstance(chunks[0], type(text_response.text))
++        assert chunks == [u('{"message":"caf\u00e9"}')]
++        assert ''.join(chunks) == text_response.text
++
++    def test_response_decode_unicode_respects_json_charset(self):
++        content = b'{"message":"caf\xc3\xa9"}'
++        r = requests.Response()
++        r.headers['Content-Type'] = 'application/json; charset=iso-8859-1'
++        r.encoding = get_encoding_from_headers(r.headers)
++        r.raw = io.BytesIO(content)
++
++        chunks = list(r.iter_content(16384, decode_unicode=True))
++
++        text_response = requests.Response()
++        text_response.headers['Content-Type'] = r.headers['Content-Type']
++        text_response.encoding = get_encoding_from_headers(text_response.headers)
++        text_response._content = content
++        text_response._content_consumed = True
++
++        assert chunks == [u('{"message":"caf\u00c3\u00a9"}')]
++        assert ''.join(chunks) == text_response.text
++
++    def test_response_decode_unicode_keeps_non_json_bytes(self):
++        r = requests.Response()
++        r.headers['Content-Type'] = 'text/plain'
++        r.encoding = None
++        r.raw = io.BytesIO(b'plain content')
++
++        assert list(r.iter_content(16384, decode_unicode=True)) == [b'plain content']
++
++        text_response = requests.Response()
++        text_response.headers['Content-Type'] = 'text/plain'
++        text_response.encoding = None
++        text_response._content = b'plain content'
++        text_response._content_consumed = True
++        assert text_response.text == u('plain content')
++
++    @pytest.mark.parametrize(
++        'encoding', (
++            'utf-16', 'utf-32', 'utf-16-be', 'utf-16-le',
++            'utf-32-be', 'utf-32-le'
++        ))
++    def test_response_json_detects_utf_encoding_without_charset(self, encoding):
++        content = u('{"message":"caf\u00e9"}').encode(encoding)
++        r = requests.Response()
++        r.headers['Content-Type'] = 'application/json'
++        r.encoding = get_encoding_from_headers(r.headers)
++        r._content = content
++        r._content_consumed = True
++
++        assert r.encoding is None
++        assert r.json() == {'message': u('caf\u00e9')}
++
++    def test_response_json_honors_explicit_utf8_encoding(self):
++        content = u('{"message":"caf\u00e9"}').encode('utf-16')
++        r = requests.Response()
++        r.headers['Content-Type'] = 'application/json'
++        r.encoding = 'utf-8'
++        r._content = content
++        r._content_consumed = True
++
++        with pytest.raises(ValueError):
++            r.json()
++
++        assert r.encoding == 'utf-8'
++        assert r.content == content
++        assert r._content_consumed is True
++
++    def test_response_json_honors_explicit_charset(self):
++        content = b'{"message":"caf\xc3\xa9"}'
++        r = requests.Response()
++        r.headers['Content-Type'] = 'application/json; charset=iso-8859-1'
++        r.encoding = get_encoding_from_headers(r.headers)
++        r._content = content
++        r._content_consumed = True
++
++        assert r.encoding == 'iso-8859-1'
++        assert r.json() == {'message': u('caf\u00c3\u00a9')}
++
++    def test_response_json_does_not_guess_encoding_for_non_json_content_type(self):
++        content = u('{"message":"caf\u00e9"}').encode('utf-16')
++        r = requests.Response()
++        r.headers['Content-Type'] = 'text/plain'
++        r.encoding = get_encoding_from_headers(r.headers)
++        r._content = content
++        r._content_consumed = True
++
++        with pytest.raises(ValueError):
++            r.json()
++
++        assert r.encoding == 'ISO-8859-1'
++        assert r.content == content
++
+     def test_response_chunk_size_int(self):
+         """Ensure that chunk_size is passed as an integer, otherwise
+         raise a TypeError.
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index 17149d2..234ccf8 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -364,10 +364,26 @@ def test_parse_dict_header(value, expected):
+             CaseInsensitiveDict({'content-type': 'application/json; charset=utf-8'}),
+             'utf-8'
+         ),
++        (
++            CaseInsensitiveDict({'content-type': 'application/json; charset=iso-8859-1'}),
++            'iso-8859-1'
++        ),
++        (
++            CaseInsensitiveDict({'content-type': 'application/json'}),
++            None
++        ),
++        (
++            CaseInsensitiveDict({'content-type': 'Application/JSON'}),
++            None
++        ),
+         (
+             CaseInsensitiveDict({'content-type': 'text/plain'}),
+             'ISO-8859-1'
+         ),
++        (
++            CaseInsensitiveDict({'content-type': 'application/octet-stream'}),
++            None
++        ),
+     ))
+ def test_get_encoding_from_headers(value, expected):
+     assert get_encoding_from_headers(value) == expected

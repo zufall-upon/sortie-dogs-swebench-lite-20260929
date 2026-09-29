@@ -1,0 +1,62 @@
+diff --git a/sklearn/tests/test_pipeline.py b/sklearn/tests/test_pipeline.py
+index fa7fa2a..57da3f3 100644
+--- a/sklearn/tests/test_pipeline.py
++++ b/sklearn/tests/test_pipeline.py
+@@ -1620,6 +1620,34 @@ def test_feature_union_set_output():
+     assert_array_equal(X_trans.index, X_test.index)
+ 
+ 
++def test_feature_union_set_output_with_row_aggregation():
++    """FeatureUnion preserves the output index when a transformer aggregates rows."""
++    pd = pytest.importorskip("pandas")
++    from sklearn._config import config_context
++
++    index = pd.date_range(
++        start="2020-01-01", end="2020-01-05", inclusive="left", freq="H"
++    )
++    data = pd.DataFrame(index=index, data=[10] * len(index), columns=["value"])
++    data["date"] = index.date
++
++    class MyTransformer(BaseEstimator, TransformerMixin):
++        def fit(self, X, y=None, **kwargs):
++            return self
++
++        def transform(self, X, y=None):
++            return X["value"].groupby(X["date"]).sum()
++
++    with config_context(transform_output="default"):
++        X_trans_default = make_union(MyTransformer()).fit_transform(data)
++    assert_array_equal(X_trans_default, [240] * 4)
++
++    with config_context(transform_output="pandas"):
++        X_trans_pandas = make_union(MyTransformer()).fit_transform(data)
++    assert_array_equal(X_trans_pandas["value"], [240] * 4)
++    assert_array_equal(X_trans_pandas.index, pd.Index(data["date"].unique()))
++
++
+ def test_feature_union_getitem():
+     """Check FeatureUnion.__getitem__ returns expected results."""
+     scalar = StandardScaler()
+diff --git a/sklearn/utils/_set_output.py b/sklearn/utils/_set_output.py
+index 335773c..6cbe6e5 100644
+--- a/sklearn/utils/_set_output.py
++++ b/sklearn/utils/_set_output.py
+@@ -127,9 +127,17 @@ def _wrap_data_with_container(method, data_to_wrap, original_input, estimator):
+         return data_to_wrap
+ 
+     # dense_config == "pandas"
++    index = getattr(original_input, "index", None)
++    if (
++        index is not None
++        and hasattr(data_to_wrap, "shape")
++        and data_to_wrap.shape[0] != len(index)
++    ):
++        index = None
++
+     return _wrap_in_pandas_container(
+         data_to_wrap=data_to_wrap,
+-        index=getattr(original_input, "index", None),
++        index=index,
+         columns=estimator.get_feature_names_out,
+     )
+ 

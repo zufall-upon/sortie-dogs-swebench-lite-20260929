@@ -1,0 +1,77 @@
+diff --git a/django/contrib/auth/tokens.py b/django/contrib/auth/tokens.py
+index 93e2d71..750db81 100644
+--- a/django/contrib/auth/tokens.py
++++ b/django/contrib/auth/tokens.py
+@@ -85,6 +85,7 @@ class PasswordResetTokenGenerator:
+            same password is chosen, due to password salting).
+         2. The last_login field will usually be updated very shortly after
+            a password reset.
++        3. The email field will change when the user's email address changes.
+         Failing those things, settings.PASSWORD_RESET_TIMEOUT eventually
+         invalidates the token.
+ 
+@@ -94,7 +95,12 @@ class PasswordResetTokenGenerator:
+         # Truncate microseconds so that tokens are consistent even if the
+         # database doesn't support microseconds.
+         login_timestamp = '' if user.last_login is None else user.last_login.replace(microsecond=0, tzinfo=None)
+-        return str(user.pk) + user.password + str(login_timestamp) + str(timestamp)
++        email_field = user.get_email_field_name()
++        email = getattr(user, email_field, '') or ''
++        return (
++            str(user.pk) + user.password + str(login_timestamp) +
++            str(timestamp) + str(email)
++        )
+ 
+     def _num_seconds(self, dt):
+         return int((dt - datetime(2001, 1, 1)).total_seconds())
+diff --git a/tests/auth_tests/test_tokens.py b/tests/auth_tests/test_tokens.py
+index bba435b..0fbfd26 100644
+--- a/tests/auth_tests/test_tokens.py
++++ b/tests/auth_tests/test_tokens.py
+@@ -1,4 +1,5 @@
+ from datetime import datetime, timedelta
++from types import SimpleNamespace
+ 
+ from django.conf import settings
+ from django.contrib.auth.models import User
+@@ -25,6 +26,40 @@ class TokenGeneratorTest(TestCase):
+         tk1 = p0.make_token(user)
+         self.assertIs(p0.check_token(user, tk1), True)
+ 
++    def test_token_invalidated_by_email_change(self):
++        user = User.objects.create_user('tokentestuser', 'test2@example.com', 'testpw')
++        generator = PasswordResetTokenGenerator()
++        token = generator.make_token(user)
++
++        user.email = 'new@example.com'
++        self.assertIs(generator.check_token(user, token), False)
++
++    def test_token_uses_custom_email_field(self):
++        user = SimpleNamespace(
++            pk=1,
++            password='hash',
++            last_login=None,
++            contact_email='test@example.com',
++            get_email_field_name=lambda: 'contact_email',
++        )
++        generator = PasswordResetTokenGenerator()
++        token = generator.make_token(user)
++
++        user.contact_email = 'new@example.com'
++        self.assertIs(generator.check_token(user, token), False)
++
++    def test_token_with_no_email_field(self):
++        user = SimpleNamespace(
++            pk=1,
++            password='hash',
++            last_login=None,
++            get_email_field_name=lambda: 'email',
++        )
++        generator = PasswordResetTokenGenerator()
++        token = generator.make_token(user)
++
++        self.assertIs(generator.check_token(user, token), True)
++
+     def test_10265(self):
+         """
+         The token generated for a user created in the same request

@@ -1,0 +1,32 @@
+diff --git a/sklearn/preprocessing/label.py b/sklearn/preprocessing/label.py
+index 61b8d4a..4af0308 100644
+--- a/sklearn/preprocessing/label.py
++++ b/sklearn/preprocessing/label.py
+@@ -127,6 +127,9 @@ class LabelEncoder(BaseEstimator, TransformerMixin):
+         check_is_fitted(self, 'classes_')
+         y = column_or_1d(y, warn=True)
+ 
++        if len(y) == 0:
++            return np.array([], dtype=np.int)
++
+         classes = np.unique(y)
+         if len(np.intersect1d(classes, self.classes_)) < len(classes):
+             diff = np.setdiff1d(classes, self.classes_)
+diff --git a/sklearn/preprocessing/tests/test_label.py b/sklearn/preprocessing/tests/test_label.py
+index 4f64fc6..1ff4a43 100644
+--- a/sklearn/preprocessing/tests/test_label.py
++++ b/sklearn/preprocessing/tests/test_label.py
+@@ -184,6 +184,13 @@ def test_label_encoder():
+     assert_raise_message(ValueError, msg, le.transform, "apple")
+ 
+ 
++def test_label_encoder_empty():
++    le = LabelEncoder()
++    for labels in ([1, 2], ['a', 'b']):
++        le.fit(labels)
++        assert_array_equal(le.transform([]), np.array([], dtype=np.int))
++
++
+ def test_label_encoder_fit_transform():
+     # Test fit_transform
+     le = LabelEncoder()

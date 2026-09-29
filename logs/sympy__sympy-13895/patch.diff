@@ -1,0 +1,41 @@
+diff --git a/sympy/simplify/simplify.py b/sympy/simplify/simplify.py
+index 1acc00b..491975b 100644
+--- a/sympy/simplify/simplify.py
++++ b/sympy/simplify/simplify.py
+@@ -553,7 +553,16 @@ def shorter(*choices):
+         floats = True
+         expr = nsimplify(expr, rational=True)
+ 
++    # Normalizing a noninteger power can split its base into factors, which
++    # is not generally valid when the base is not positive.  Mask such powers
++    # so normalization of their parents cannot rewrite them either.
++    unsafe = {w: Dummy() for w in expr.atoms(Pow)
++              if w.is_commutative is True and
++              w.exp.is_integer is not True and
++              w.base.is_positive is not True}
++    expr = expr.xreplace(unsafe)
+     expr = bottom_up(expr, lambda w: w.normal())
++    expr = expr.xreplace({d: w for w, d in unsafe.items()})
+     expr = Mul(*powsimp(expr).as_content_primitive())
+     _e = cancel(expr)
+     expr1 = shorter(_e, _mexpand(_e).cancel())  # issue 6829
+diff --git a/sympy/simplify/tests/test_simplify.py b/sympy/simplify/tests/test_simplify.py
+index 4bea38b..bbd46b5 100644
+--- a/sympy/simplify/tests/test_simplify.py
++++ b/sympy/simplify/tests/test_simplify.py
+@@ -121,6 +121,15 @@ def test_simplify_expr():
+     assert simplify(hyper([], [], x)) == exp(x)
+ 
+ 
++def test_issue_13895():
++    x = Symbol('x')
++    e = (-x/4 - S(1)/12)**x - 1
++    f = simplify(e)
++    a = S(9)/5
++    assert abs(complex(e.subs(x, a).evalf()) -
++               complex(f.subs(x, a).evalf())) < 1e-12
++
++
+ def test_issue_3557():
+     f_1 = x*a + y*b + z*c - 1
+     f_2 = x*d + y*e + z*f - 1

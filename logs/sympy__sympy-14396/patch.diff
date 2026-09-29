@@ -1,0 +1,104 @@
+diff --git a/sympy/polys/polyoptions.py b/sympy/polys/polyoptions.py
+index 6e504a3..aad97f7 100644
+--- a/sympy/polys/polyoptions.py
++++ b/sympy/polys/polyoptions.py
+@@ -405,7 +405,7 @@ class Domain(with_metaclass(OptionType, Option)):
+     _re_realfield = re.compile(r"^(R|RR)(_(\d+))?$")
+     _re_complexfield = re.compile(r"^(C|CC)(_(\d+))?$")
+     _re_finitefield = re.compile(r"^(FF|GF)\((\d+)\)$")
+-    _re_polynomial = re.compile(r"^(Z|ZZ|Q|QQ)\[(.+)\]$")
++    _re_polynomial = re.compile(r"^(Z|ZZ|Q|QQ|R|RR)\[(.+)\]$")
+     _re_fraction = re.compile(r"^(Z|ZZ|Q|QQ)\((.+)\)$")
+     _re_algebraic = re.compile(r"^(Q|QQ)\<(.+)\>$")
+ 
+@@ -455,10 +455,16 @@ def preprocess(cls, domain):
+             if r is not None:
+                 ground, gens = r.groups()
+ 
++                if ground in ['R', 'RR'] and any(
++                        not gen.strip() for gen in gens.split(',')):
++                    raise OptionError('invalid domain specification: %s' % domain)
++
+                 gens = list(map(sympify, gens.split(',')))
+ 
+                 if ground in ['Z', 'ZZ']:
+                     return sympy.polys.domains.ZZ.poly_ring(*gens)
++                elif ground in ['R', 'RR']:
++                    return sympy.polys.domains.RR.poly_ring(*gens)
+                 else:
+                     return sympy.polys.domains.QQ.poly_ring(*gens)
+ 
+@@ -480,7 +486,7 @@ def preprocess(cls, domain):
+                 gens = list(map(sympify, r.groups()[1].split(',')))
+                 return sympy.polys.domains.QQ.algebraic_field(*gens)
+ 
+-        raise OptionError('expected a valid domain specification, got %s' % domain)
++        raise OptionError('invalid domain specification: %s' % domain)
+ 
+     @classmethod
+     def postprocess(cls, options):
+diff --git a/sympy/polys/tests/test_polyoptions.py b/sympy/polys/tests/test_polyoptions.py
+index cbc9681..1b9bc98 100644
+--- a/sympy/polys/tests/test_polyoptions.py
++++ b/sympy/polys/tests/test_polyoptions.py
+@@ -6,7 +6,7 @@
+     Frac, Formal, Polys, Include, All, Gen, Symbols, Method)
+ 
+ from sympy.polys.orderings import lex
+-from sympy.polys.domains import FF, GF, ZZ, QQ, EX
++from sympy.polys.domains import FF, GF, ZZ, QQ, RR, EX
+ 
+ from sympy.polys.polyerrors import OptionError, GeneratorsError
+ 
+@@ -176,6 +176,7 @@ def test_Domain_preprocess():
+ 
+     assert Domain.preprocess('Z[x]') == ZZ[x]
+     assert Domain.preprocess('Q[x]') == QQ[x]
++    assert Domain.preprocess('R[x]') == RR[x]
+ 
+     assert Domain.preprocess('ZZ[x]') == ZZ[x]
+     assert Domain.preprocess('QQ[x]') == QQ[x]
+@@ -185,6 +186,7 @@ def test_Domain_preprocess():
+ 
+     assert Domain.preprocess('ZZ[x,y]') == ZZ[x, y]
+     assert Domain.preprocess('QQ[x,y]') == QQ[x, y]
++    assert Domain.preprocess('RR[x,y]') == RR[x, y]
+ 
+     raises(OptionError, lambda: Domain.preprocess('Z()'))
+ 
+@@ -209,6 +211,14 @@ def test_Domain_preprocess():
+ 
+     raises(OptionError, lambda: Domain.preprocess('abc'))
+ 
++    for domain in ['RR[y,]', 'RR[,y]', 'RR[y,,z]', 'RR[]']:
++        try:
++            Domain.preprocess(domain)
++        except OptionError as exc:
++            assert str(exc) == 'invalid domain specification: %s' % domain
++        else:
++            assert False
++
+ 
+ def test_Domain_postprocess():
+     raises(GeneratorsError, lambda: Domain.postprocess({'gens': (x, y),
+diff --git a/sympy/polys/tests/test_polytools.py b/sympy/polys/tests/test_polytools.py
+index 1f889e9..d981365 100644
+--- a/sympy/polys/tests/test_polytools.py
++++ b/sympy/polys/tests/test_polytools.py
+@@ -319,6 +319,16 @@ def test_Poly__new__():
+     assert Poly(3*x**2 + 2*x + 1, domain='ZZ').all_coeffs() == [3, 2, 1]
+     assert Poly(3*x**2 + 2*x + 1, domain='QQ').all_coeffs() == [3, 2, 1]
+     assert Poly(3*x**2 + 2*x + 1, domain='RR').all_coeffs() == [3.0, 2.0, 1.0]
++    assert Poly(1.2*x*y*z, x, domain='RR[y,z]') == Poly(1.2*x*y*z, x)
++    assert Poly((y + z)*x + 1, x, domain='QQ[y,z]') == \
++        Poly((y + z)*x + 1, x, domain=QQ[y, z])
++
++    try:
++        Poly(1.2*x*y*z, x, domain='RR[y,]')
++    except OptionError as exc:
++        assert str(exc) == 'invalid domain specification: RR[y,]'
++    else:
++        assert False
+ 
+     raises(CoercionFailed, lambda: Poly(3*x**2/5 + 2*x/5 + 1, domain='ZZ'))
+     assert Poly(

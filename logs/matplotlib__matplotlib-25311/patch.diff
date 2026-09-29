@@ -1,0 +1,90 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index 10a4072..bcc0a1f 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -3201,6 +3201,11 @@ None}, default: None
+             pylab_helpers.Gcf._set_new_active_manager(mgr)
+             plt.draw_if_interactive()
+ 
++        for artist in self.findobj():
++            draggable = getattr(artist, "_draggable", None)
++            if draggable is not None:
++                draggable.canvas = self.canvas
++
+         self.stale = True
+ 
+     def add_axobserver(self, func):
+diff --git a/lib/matplotlib/offsetbox.py b/lib/matplotlib/offsetbox.py
+index 1dee8a2..fa15c96 100644
+--- a/lib/matplotlib/offsetbox.py
++++ b/lib/matplotlib/offsetbox.py
+@@ -1514,6 +1514,11 @@ class DraggableBase:
+                 'button_release_event', self.on_release),
+         ]
+ 
++    def __getstate__(self):
++        state = self.__dict__.copy()
++        state.pop("canvas")
++        return state
++
+     def on_motion(self, evt):
+         if self._check_still_parented() and self.got_artist:
+             dx = evt.x - self.mouse_x
+diff --git a/lib/matplotlib/tests/test_legend.py b/lib/matplotlib/tests/test_legend.py
+index a8d7fd1..b84046d 100644
+--- a/lib/matplotlib/tests/test_legend.py
++++ b/lib/matplotlib/tests/test_legend.py
+@@ -1,4 +1,5 @@
+ import collections
++import pickle
+ import platform
+ from unittest import mock
+ import warnings
+@@ -1032,6 +1033,18 @@ def test_get_set_draggable():
+     assert not legend.get_draggable()
+ 
+ 
++def test_draggable_legend_pickle():
++    fig, ax = plt.subplots()
++    ax.plot([0, 1], [0, 1], label='line')
++    ax.legend().set_draggable(True)
++
++    fig = pickle.loads(pickle.dumps(fig))
++
++    legend = fig.axes[0].get_legend()
++    assert legend.get_draggable()
++    assert legend._draggable.canvas is fig.canvas
++
++
+ @pytest.mark.parametrize('draggable', (True, False))
+ def test_legend_draggable(draggable):
+     fig, ax = plt.subplots()
+diff --git a/lib/matplotlib/tests/test_text.py b/lib/matplotlib/tests/test_text.py
+index 65aff05..a30b375 100644
+--- a/lib/matplotlib/tests/test_text.py
++++ b/lib/matplotlib/tests/test_text.py
+@@ -1,5 +1,6 @@
+ from datetime import datetime
+ import io
++import pickle
+ import warnings
+ 
+ import numpy as np
+@@ -247,6 +248,17 @@ def test_annotation_contains():
+     assert ann.contains(event) == (False, {})
+ 
+ 
++def test_draggable_annotation_pickle():
++    fig, ax = plt.subplots()
++    ax.annotate('text', (0.5, 0.5)).draggable(True)
++
++    fig = pickle.loads(pickle.dumps(fig))
++
++    annotation = fig.axes[0].texts[0]
++    assert annotation._draggable is not None
++    assert annotation._draggable.canvas is fig.canvas
++
++
+ @pytest.mark.parametrize('err, xycoords, match', (
+     (RuntimeError, print, "Unknown return type"),
+     (RuntimeError, [0, 0], r"Unknown coordinate type: \[0, 0\]"),

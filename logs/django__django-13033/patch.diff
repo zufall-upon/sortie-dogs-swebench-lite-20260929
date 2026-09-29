@@ -1,0 +1,86 @@
+diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py
+index abbb1e3..a8f5b61 100644
+--- a/django/db/models/sql/compiler.py
++++ b/django/db/models/sql/compiler.py
+@@ -727,7 +727,7 @@ class SQLCompiler:
+         # If we get to this point and the field is a relation to another model,
+         # append the default ordering for that model unless it is the pk
+         # shortcut or the attribute name of the field that is specified.
+-        if field.is_relation and opts.ordering and getattr(field, 'attname', None) != name and name != 'pk':
++        if field.is_relation and opts.ordering and getattr(field, 'attname', None) != pieces[-1] and name != 'pk':
+             # Firstly, avoid infinite loops.
+             already_seen = already_seen or set()
+             join_tuple = tuple(getattr(self.query.alias_map[j], 'join_cols', None) for j in joins)
+diff --git a/tests/ordering/models.py b/tests/ordering/models.py
+index 2efb743..29bb8f3 100644
+--- a/tests/ordering/models.py
++++ b/tests/ordering/models.py
+@@ -59,3 +59,15 @@ class Reference(models.Model):
+ 
+     class Meta:
+         ordering = ('article',)
++
++
++class OneModel(models.Model):
++    oneval = models.IntegerField()
++    root = models.ForeignKey('self', models.CASCADE, null=True)
++
++    class Meta:
++        ordering = ('-id',)
++
++
++class TwoModel(models.Model):
++    record = models.ForeignKey(OneModel, models.CASCADE)
+diff --git a/tests/ordering/tests.py b/tests/ordering/tests.py
+index a9cc729..899f798 100644
+--- a/tests/ordering/tests.py
++++ b/tests/ordering/tests.py
+@@ -8,7 +8,10 @@ from django.db.models import (
+ from django.db.models.functions import Upper
+ from django.test import TestCase
+ 
+-from .models import Article, Author, ChildArticle, OrderedByFArticle, Reference
++from .models import (
++    Article, Author, ChildArticle, OneModel, OrderedByFArticle, Reference,
++    TwoModel,
++)
+ 
+ 
+ class OrderingTests(TestCase):
+@@ -343,6 +346,36 @@ class OrderingTests(TestCase):
+             attrgetter("headline")
+         )
+ 
++    def test_order_by_self_referential_fk_attname(self):
++        roots = [OneModel.objects.create(oneval=0) for _ in range(3)]
++        records = [
++            OneModel.objects.create(oneval=1, root=roots[2]),
++            OneModel.objects.create(oneval=2, root=roots[0]),
++            OneModel.objects.create(oneval=3, root=roots[1]),
++        ]
++        for record in records:
++            TwoModel.objects.create(record=record)
++        queryset = TwoModel.objects.filter(record__oneval__in=[1, 2, 3])
++
++        for expression, expected, join_count, column, direction in (
++            ('record__root_id', [2, 3, 1], 1, 'root_id', 'ASC'),
++            ('-record__root_id', [1, 3, 2], 1, 'root_id', 'DESC'),
++            ('record__root', [1, 3, 2], 2, 'id', 'DESC'),
++            ('record__root__id', [2, 3, 1], 1, 'root_id', 'ASC'),
++        ):
++            with self.subTest(expression=expression):
++                ordered = queryset.order_by(expression)
++                self.assertSequenceEqual(
++                    ordered.values_list('record__oneval', flat=True), expected,
++                )
++                sql = str(ordered.query)
++                self.assertEqual(sql.upper().count('JOIN'), join_count)
++                ordering_sql = sql.rsplit('ORDER BY', 1)[1].upper()
++                self.assertIn(column.upper(), ordering_sql)
++                self.assertIn(' %s' % direction, ordering_sql)
++                reverse_direction = 'DESC' if direction == 'ASC' else 'ASC'
++                self.assertNotIn(' %s' % reverse_direction, ordering_sql)
++
+     def test_order_by_f_expression(self):
+         self.assertQuerysetEqual(
+             Article.objects.order_by(F('headline')), [

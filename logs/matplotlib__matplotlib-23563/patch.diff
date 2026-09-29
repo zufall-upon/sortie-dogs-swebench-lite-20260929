@@ -1,0 +1,43 @@
+diff --git a/lib/mpl_toolkits/mplot3d/art3d.py b/lib/mpl_toolkits/mplot3d/art3d.py
+index 8fe6e7a..9b4a855 100644
+--- a/lib/mpl_toolkits/mplot3d/art3d.py
++++ b/lib/mpl_toolkits/mplot3d/art3d.py
+@@ -221,8 +221,8 @@ class Line3D(lines.Line2D):
+ def line_2d_to_3d(line, zs=0, zdir='z'):
+     """Convert a 2D line to 3D."""
+ 
++    Line3D.set_3d_properties(line, zs=zs, zdir=zdir)
+     line.__class__ = Line3D
+-    line.set_3d_properties(zs, zdir)
+ 
+ 
+ def _path_to_3d_segment(path, zs=0, zdir='z'):
+diff --git a/lib/mpl_toolkits/tests/test_mplot3d.py b/lib/mpl_toolkits/tests/test_mplot3d.py
+index ea5a000..cbef4b5 100644
+--- a/lib/mpl_toolkits/tests/test_mplot3d.py
++++ b/lib/mpl_toolkits/tests/test_mplot3d.py
+@@ -270,6 +270,24 @@ def test_plot_scalar(fig_test, fig_ref):
+     ax2.plot(1, 1, "o")
+ 
+ 
++def test_plot_invalid_multidimensional_line():
++    fig = plt.figure()
++    ax = fig.add_subplot(projection='3d')
++    xs = np.arange(2)[:, np.newaxis]
++
++    with pytest.raises(ValueError):
++        ax.plot(xs, xs)
++
++    line, = ax.lines
++    assert not isinstance(line, art3d.Line3D)
++
++    line, = ax.plot([1, 2], [1, 2], [1, 2], 'r-')
++    assert isinstance(line, art3d.Line3D)
++    np.testing.assert_array_equal(
++        ([1, 2], [1, 2], [1, 2]), line.get_data_3d())
++    fig.canvas.draw()
++
++
+ @mpl3d_image_comparison(['mixedsubplot.png'])
+ def test_mixedsubplots():
+     def f(t):

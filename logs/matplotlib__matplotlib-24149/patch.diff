@@ -1,0 +1,42 @@
+diff --git a/lib/matplotlib/axes/_axes.py b/lib/matplotlib/axes/_axes.py
+index fdac0f3..cabef36 100644
+--- a/lib/matplotlib/axes/_axes.py
++++ b/lib/matplotlib/axes/_axes.py
+@@ -2195,7 +2195,7 @@ class Axes(_AxesBase):
+             dx = [convert(x0 + ddx) - x for ddx in dx]
+             if delist:
+                 dx = dx[0]
+-        except (ValueError, TypeError, AttributeError):
++        except (ValueError, TypeError, AttributeError, StopIteration):
+             # if the above fails (for any reason) just fallback to what
+             # we do by default and convert dx by itself.
+             dx = convert(dx)
+diff --git a/lib/matplotlib/tests/test_axes.py b/lib/matplotlib/tests/test_axes.py
+index 9fb95cb..23c9515 100644
+--- a/lib/matplotlib/tests/test_axes.py
++++ b/lib/matplotlib/tests/test_axes.py
+@@ -8195,3 +8195,24 @@ def test_bar_leading_nan():
+         for b in rest:
+             assert np.isfinite(b.xy).all()
+             assert np.isfinite(b.get_width())
++
++
++@pytest.mark.parametrize(
++    "x, height, expected_x, expected_height",
++    [([np.nan], [np.nan], np.nan, np.nan),
++     ([np.nan], [0], np.nan, 0),
++     ([0], [np.nan], -0.4, np.nan)])
++def test_bar_all_nan(x, height, expected_x, expected_height):
++    fig, ax = plt.subplots()
++    bars = ax.bar(x, height)
++
++    assert len(bars) == 1
++    assert isinstance(bars[0], mpatches.Rectangle)
++    if np.isnan(expected_x):
++        assert np.isnan(bars[0].get_x())
++    else:
++        assert bars[0].get_x() == expected_x
++    if np.isnan(expected_height):
++        assert np.isnan(bars[0].get_height())
++    else:
++        assert bars[0].get_height() == expected_height

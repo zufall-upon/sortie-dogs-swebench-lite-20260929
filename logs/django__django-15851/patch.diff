@@ -1,0 +1,45 @@
+diff --git a/django/db/backends/postgresql/client.py b/django/db/backends/postgresql/client.py
+index 4c9bd63..3b5ddaf 100644
+--- a/django/db/backends/postgresql/client.py
++++ b/django/db/backends/postgresql/client.py
+@@ -32,9 +32,9 @@ class DatabaseClient(BaseDatabaseClient):
+             args += ["-h", host]
+         if port:
+             args += ["-p", str(port)]
++        args.extend(parameters)
+         if dbname:
+             args += [dbname]
+-        args.extend(parameters)
+ 
+         env = {}
+         if passwd:
+diff --git a/tests/dbshell/test_postgresql.py b/tests/dbshell/test_postgresql.py
+index 02924d0..3d5bf3c 100644
+--- a/tests/dbshell/test_postgresql.py
++++ b/tests/dbshell/test_postgresql.py
+@@ -78,8 +78,10 @@ class PostgreSqlDbshellCommandTestCase(SimpleTestCase):
+ 
+     def test_service(self):
+         self.assertEqual(
+-            self.settings_to_cmd_args_env({"OPTIONS": {"service": "django_test"}}),
+-            (["psql"], {"PGSERVICE": "django_test"}),
++            self.settings_to_cmd_args_env(
++                {"OPTIONS": {"service": "django_test"}}, ["--help"]
++            ),
++            (["psql", "--help"], {"PGSERVICE": "django_test"}),
+         )
+ 
+     def test_passfile(self):
+@@ -154,7 +156,11 @@ class PostgreSqlDbshellCommandTestCase(SimpleTestCase):
+     def test_parameters(self):
+         self.assertEqual(
+             self.settings_to_cmd_args_env({"NAME": "dbname"}, ["--help"]),
+-            (["psql", "dbname", "--help"], None),
++            (["psql", "--help", "dbname"], None),
++        )
++        self.assertEqual(
++            self.settings_to_cmd_args_env({}, ["--help"]),
++            (["psql", "--help", "postgres"], None),
+         )
+ 
+     @skipUnless(connection.vendor == "postgresql", "Requires a PostgreSQL connection")

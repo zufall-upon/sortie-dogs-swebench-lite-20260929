@@ -1,0 +1,40 @@
+diff --git a/src/_pytest/tmpdir.py b/src/_pytest/tmpdir.py
+index 29c7e19..32bd581 100644
+--- a/src/_pytest/tmpdir.py
++++ b/src/_pytest/tmpdir.py
+@@ -111,7 +111,7 @@ class TempPathFactory:
+         else:
+             from_env = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+             temproot = Path(from_env or tempfile.gettempdir()).resolve()
+-            user = get_user() or "unknown"
++            user = re.sub(r"[\W]", "_", get_user() or "unknown")
+             # use a sub-directory in the temproot to speed-up
+             # make_numbered_dir() call
+             rootdir = temproot.joinpath(f"pytest-of-{user}")
+diff --git a/testing/test_tmpdir.py b/testing/test_tmpdir.py
+index d123287..bd09f2f 100644
+--- a/testing/test_tmpdir.py
++++ b/testing/test_tmpdir.py
+@@ -184,6 +184,22 @@ def test_tmpdir_factory(pytester: Pytester) -> None:
+     reprec.assertoutcome(passed=1)
+ 
+ 
++def test_tmpdir_domain_username(pytester: Pytester, monkeypatch) -> None:
++    monkeypatch.setenv("LOGNAME", r"contoso\john_doe")
++    pytester.makepyfile(
++        """
++        def test_tmpdir_factory_domain_username(tmpdir_factory):
++            tmpdir_factory.mktemp("foobar")
++            assert (
++                tmpdir_factory.getbasetemp().dirpath().basename
++                == "pytest-of-contoso_john_doe"
++            )
++    """
++    )
++    reprec = pytester.inline_run()
++    reprec.assertoutcome(passed=1)
++
++
+ def test_tmpdir_fallback_tox_env(pytester: Pytester, monkeypatch) -> None:
+     """Test that tmpdir works even if environment variables required by getpass
+     module are missing (#1010).

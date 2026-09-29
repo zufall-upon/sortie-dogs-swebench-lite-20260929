@@ -1,0 +1,70 @@
+diff --git a/sphinx/ext/viewcode.py b/sphinx/ext/viewcode.py
+index a7d52a9..863fc3d 100644
+--- a/sphinx/ext/viewcode.py
++++ b/sphinx/ext/viewcode.py
+@@ -180,6 +180,8 @@ def should_generate_module_page(app: Sphinx, modname: str) -> bool:
+ 
+ def collect_pages(app: Sphinx) -> Generator[Tuple[str, Dict[str, Any], str], None, None]:
+     env = app.builder.env
++    if app.builder.name.startswith("epub") and not env.config.viewcode_enable_epub:
++        return
+     if not hasattr(env, '_viewcode_modules'):
+         return
+     highlighter = app.builder.highlighter  # type: ignore
+diff --git a/tests/test_ext_viewcode.py b/tests/test_ext_viewcode.py
+index 7986409..5a9f7a6 100644
+--- a/tests/test_ext_viewcode.py
++++ b/tests/test_ext_viewcode.py
+@@ -9,6 +9,7 @@
+ """
+ 
+ import re
++from zipfile import ZipFile
+ 
+ import pytest
+ 
+@@ -39,6 +40,7 @@ def test_viewcode(app, status, warning):
+ 
+     result = (app.outdir / '_modules/spam/mod1.html').read_text()
+     result = re.sub('<span class=".*?">', '<span>', result)  # filter pygments classes
++    result = re.sub(r'<span>(\s+)</span>', r'\1', result)  # normalize whitespace tokens
+     assert ('<div class="viewcode-block" id="Class1"><a class="viewcode-back" '
+             'href="../../index.html#spam.Class1">[docs]</a>'
+             '<span>@decorator</span>\n'
+@@ -49,6 +51,36 @@ def test_viewcode(app, status, warning):
+             '<span>    &quot;&quot;&quot;</span></div>\n') in result
+ 
+ 
++@pytest.mark.sphinx(testroot='ext-viewcode')
++def test_viewcode_disabled_epub_after_html(app, make_app):
++    app.build()
++    assert (app.outdir / '_modules' / 'spam' / 'mod1.html').exists()
++
++    epub = make_app(buildername='epub', srcdir=app.srcdir)
++    epub.build()
++
++    assert not (epub.outdir / '_modules').exists()
++    epub_file = epub.outdir / next(name for name in epub.outdir.listdir()
++                                   if name.endswith('.epub'))
++    with ZipFile(epub_file) as archive:
++        assert not any(name.startswith('_modules/') for name in archive.namelist())
++
++
++@pytest.mark.sphinx('epub', testroot='ext-viewcode',
++                    freshenv=True,
++                    confoverrides={'viewcode_enable_epub': True})
++def test_viewcode_enabled_epub(app):
++    app.build()
++
++    assert (app.outdir / '_modules' / 'spam' / 'mod1.xhtml').exists()
++    assert (app.outdir / '_modules' / 'index.xhtml').exists()
++    epub_file = app.outdir / next(name for name in app.outdir.listdir()
++                                  if name.endswith('.epub'))
++    with ZipFile(epub_file) as archive:
++        assert '_modules/spam/mod1.xhtml' in archive.namelist()
++        assert '_modules/index.xhtml' in archive.namelist()
++
++
+ @pytest.mark.sphinx(testroot='ext-viewcode', tags=['test_linkcode'])
+ def test_linkcode(app, status, warning):
+     app.builder.build(['objects'])

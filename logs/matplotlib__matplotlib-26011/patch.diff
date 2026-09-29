@@ -1,0 +1,36 @@
+diff --git a/lib/matplotlib/axis.py b/lib/matplotlib/axis.py
+index e6e7e29..f2abb72 100644
+--- a/lib/matplotlib/axis.py
++++ b/lib/matplotlib/axis.py
+@@ -1244,6 +1244,7 @@ class Axis(martist.Artist):
+                 if other is not self.axes:
+                     other._axis_map[name]._set_lim(
+                         v0, v1, emit=False, auto=auto)
++                    other.callbacks.process(f"{name}lim_changed", other)
+                     if other.figure != self.figure:
+                         other.figure.canvas.draw_idle()
+ 
+diff --git a/lib/matplotlib/tests/test_axes.py b/lib/matplotlib/tests/test_axes.py
+index baef9ac..11b2492 100644
+--- a/lib/matplotlib/tests/test_axes.py
++++ b/lib/matplotlib/tests/test_axes.py
+@@ -6602,6 +6602,19 @@ def test_remove_shared_axes_relim():
+     assert_array_equal(ax_lst[0][1].get_xlim(), orig_xlim)
+ 
+ 
++def test_shared_xlim_callbacks():
++    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
++    callbacks = []
++    ax2.callbacks.connect("xlim_changed", callbacks.append)
++
++    ax1.set_xlim(2, 4)
++    assert callbacks == [ax2]
++    assert ax2.get_xlim() == (2, 4)
++
++    ax1.set_xlim(3, 5, emit=False)
++    assert callbacks == [ax2]
++
++
+ def test_shared_axes_autoscale():
+     l = np.arange(-80, 90, 40)
+     t = np.random.random_sample((l.size, l.size))

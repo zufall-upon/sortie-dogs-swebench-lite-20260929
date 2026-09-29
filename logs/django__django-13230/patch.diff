@@ -1,0 +1,102 @@
+diff --git a/django/contrib/syndication/views.py b/django/contrib/syndication/views.py
+index 68ffb0b..7c29c23 100644
+--- a/django/contrib/syndication/views.py
++++ b/django/contrib/syndication/views.py
+@@ -199,6 +199,9 @@ class Feed:
+             if updateddate and is_naive(updateddate):
+                 updateddate = make_aware(updateddate, tz)
+ 
++            comments = self._get_dynamic_attr('item_comments', item)
++            item_extra_kwargs = dict(self.item_extra_kwargs(item))
++            comments = item_extra_kwargs.pop('comments', comments)
+             feed.add_item(
+                 title=title,
+                 link=link,
+@@ -212,8 +215,9 @@ class Feed:
+                 author_name=author_name,
+                 author_email=author_email,
+                 author_link=author_link,
++                comments=comments,
+                 categories=self._get_dynamic_attr('item_categories', item),
+                 item_copyright=self._get_dynamic_attr('item_copyright', item),
+-                **self.item_extra_kwargs(item)
++                **item_extra_kwargs
+             )
+         return feed
+diff --git a/tests/syndication_tests/feeds.py b/tests/syndication_tests/feeds.py
+index 4e9b117..619c530 100644
+--- a/tests/syndication_tests/feeds.py
++++ b/tests/syndication_tests/feeds.py
+@@ -41,6 +41,29 @@ class TestRss2FeedWithGuidIsPermaLinkTrue(TestRss2Feed):
+         return True
+ 
+ 
++class TestRss2FeedWithComments(TestRss2Feed):
++    def item_comments(self, item):
++        return 'http://example.com/blog/%s/comments/' % item.pk
++
++
++class NoCopyMapping:
++    def __init__(self, **kwargs):
++        self.data = kwargs
++
++    def keys(self):
++        return self.data.keys()
++
++    def __getitem__(self, key):
++        return self.data[key]
++
++
++class TestRss2FeedWithLegacyComments(TestRss2Feed):
++    legacy_extra_kwargs = NoCopyMapping(comments='http://example.com/comments/')
++
++    def item_extra_kwargs(self, item):
++        return self.legacy_extra_kwargs
++
++
+ class TestRss2FeedWithGuidIsPermaLinkFalse(TestRss2Feed):
+     def item_guid(self, item):
+         return str(item.pk)
+diff --git a/tests/syndication_tests/tests.py b/tests/syndication_tests/tests.py
+index dab7eba..51ad9be 100644
+--- a/tests/syndication_tests/tests.py
++++ b/tests/syndication_tests/tests.py
+@@ -144,6 +144,25 @@ class SyndicationFeedTest(FeedTestCase):
+             self.assertIsNone(item.getElementsByTagName(
+                 'guid')[0].attributes.get('isPermaLink'))
+ 
++    def test_rss2_feed_comments(self):
++        response = self.client.get('/syndication/rss2/comments/')
++        doc = minidom.parseString(response.content)
++        items = doc.getElementsByTagName('item')
++        self.assertEqual(len(items), Entry.objects.count())
++        for item in items:
++            guid = item.getElementsByTagName('guid')[0].firstChild.nodeValue
++            comments = item.getElementsByTagName('comments')[0].firstChild.nodeValue
++            self.assertEqual(comments, '%scomments/' % guid)
++
++    def test_rss2_feed_legacy_comments(self):
++        response = self.client.get('/syndication/rss2/legacy-comments/')
++        doc = minidom.parseString(response.content)
++        items = doc.getElementsByTagName('item')
++        self.assertEqual(len(items), Entry.objects.count())
++        for item in items:
++            comments = item.getElementsByTagName('comments')[0].firstChild.nodeValue
++            self.assertEqual(comments, 'http://example.com/comments/')
++
+     def test_rss2_feed_guid_permalink_false(self):
+         """
+         Test if the 'isPermaLink' attribute of <guid> element of an item
+diff --git a/tests/syndication_tests/urls.py b/tests/syndication_tests/urls.py
+index bff7bd0..ed14449 100644
+--- a/tests/syndication_tests/urls.py
++++ b/tests/syndication_tests/urls.py
+@@ -4,6 +4,8 @@ from . import feeds
+ 
+ urlpatterns = [
+     path('syndication/rss2/', feeds.TestRss2Feed()),
++    path('syndication/rss2/comments/', feeds.TestRss2FeedWithComments()),
++    path('syndication/rss2/legacy-comments/', feeds.TestRss2FeedWithLegacyComments()),
+     path(
+         'syndication/rss2/guid_ispermalink_true/',
+         feeds.TestRss2FeedWithGuidIsPermaLinkTrue()),

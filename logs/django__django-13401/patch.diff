@@ -1,0 +1,65 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index 2837427..f9d8553 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -516,17 +516,22 @@ class Field(RegisterLookupMixin):
+     def __eq__(self, other):
+         # Needed for @total_ordering
+         if isinstance(other, Field):
+-            return self.creation_counter == other.creation_counter
++            return (
++                self.creation_counter == other.creation_counter and
++                getattr(self, 'model', None) is getattr(other, 'model', None)
++            )
+         return NotImplemented
+ 
+     def __lt__(self, other):
+         # This is needed because bisect does not take a comparison function.
+         if isinstance(other, Field):
+-            return self.creation_counter < other.creation_counter
++            return (self.creation_counter, id(getattr(self, 'model', None))) < (
++                other.creation_counter, id(getattr(other, 'model', None)),
++            )
+         return NotImplemented
+ 
+     def __hash__(self):
+-        return hash(self.creation_counter)
++        return hash((self.creation_counter, id(getattr(self, 'model', None))))
+ 
+     def __deepcopy__(self, memodict):
+         # We don't have to deepcopy very much here, since most things are not
+diff --git a/tests/model_fields/tests.py b/tests/model_fields/tests.py
+index b97c99d..efa8c68 100644
+--- a/tests/model_fields/tests.py
++++ b/tests/model_fields/tests.py
+@@ -90,6 +90,30 @@ class BasicFieldTests(SimpleTestCase):
+         self.assertIsNotNone(f1)
+         self.assertNotIn(f2, (None, 1, ''))
+ 
++    def test_field_model_comparison(self):
++        class AbstractModel(models.Model):
++            myfield = models.IntegerField()
++
++            class Meta:
++                abstract = True
++                app_label = 'model_fields'
++
++        class B(AbstractModel):
++            class Meta:
++                app_label = 'model_fields'
++
++        class C(AbstractModel):
++            class Meta:
++                app_label = 'model_fields'
++
++        b = B._meta.get_field('myfield')
++        c = C._meta.get_field('myfield')
++        self.assertEqual(b.creation_counter, c.creation_counter)
++        self.assertNotEqual(b, c)
++        self.assertEqual(len({b, c}), 2)
++        self.assertEqual(b < c, id(b.model) < id(c.model))
++        self.assertEqual(c < b, id(c.model) < id(b.model))
++
+     def test_field_instance_is_picklable(self):
+         """Field instances can be pickled."""
+         field = models.Field(max_length=100, default='a string')

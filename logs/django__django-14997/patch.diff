@@ -1,0 +1,69 @@
+diff --git a/django/db/backends/sqlite3/schema.py b/django/db/backends/sqlite3/schema.py
+index f0c81c1..5959199 100644
+--- a/django/db/backends/sqlite3/schema.py
++++ b/django/db/backends/sqlite3/schema.py
+@@ -4,7 +4,7 @@ from decimal import Decimal
+ from django.apps.registry import Apps
+ from django.db import NotSupportedError
+ from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+-from django.db.backends.ddl_references import Statement
++from django.db.backends.ddl_references import Expressions, Statement
+ from django.db.backends.utils import strip_quotes
+ from django.db.models import UniqueConstraint
+ from django.db.transaction import atomic
+@@ -300,6 +300,13 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
+ 
+         # Run deferred SQL on correct table
+         for sql in self.deferred_sql:
++            if isinstance(sql, Statement):
++                for part in sql.parts.values():
++                    if isinstance(part, Expressions):
++                        # SQLite doesn't allow table-qualified column names
++                        # in index expressions.
++                        for col in part.compiler.query._gen_cols([part.expressions]):
++                            col.alias = None
+             self.execute(sql)
+         self.deferred_sql = []
+         # Fix any PK-removed field
+diff --git a/tests/schema/tests.py b/tests/schema/tests.py
+index b8ad082..9e72a05 100644
+--- a/tests/schema/tests.py
++++ b/tests/schema/tests.py
+@@ -2253,6 +2253,37 @@ class SchemaTests(TransactionTestCase):
+             editor.remove_constraint(Author, constraint)
+         self.assertNotIn(constraint.name, self.get_constraints(table))
+ 
++    @isolate_apps('schema')
++    @skipUnlessDBFeature('supports_expression_indexes')
++    def test_remake_table_with_expression_unique_constraint(self):
++        class Tag(Model):
++            name = SlugField()
++            value = CharField(max_length=200)
++
++            class Meta:
++                app_label = 'schema'
++                db_table = 'schema_tag_expression_unique'
++
++        self.isolated_local_models.append(Tag)
++        constraint = UniqueConstraint(F('name'), F('value'), name='unique_name_value')
++        with connection.schema_editor() as editor:
++            editor.create_model(Tag)
++            editor.add_constraint(Tag, constraint)
++        # AddConstraint updates the model state used by the following operation.
++        Tag._meta.constraints = [constraint]
++        Tag.objects.create(name='django', value='tag')
++
++        old_field = Tag._meta.get_field('value')
++        new_field = CharField(max_length=150)
++        new_field.set_attributes_from_name('value')
++        with connection.schema_editor() as editor:
++            editor.alter_field(Tag, old_field, new_field, strict=True)
++
++        self.assertEqual(list(Tag.objects.values_list('name', 'value')), [('django', 'tag')])
++        with self.assertRaises(IntegrityError):
++            Tag.objects.create(name='django', value='tag')
++        self.assertEqual(Tag.objects.count(), 1)
++
+     @skipUnlessDBFeature('supports_expression_indexes')
+     def test_composite_func_unique_constraint(self):
+         with connection.schema_editor() as editor:

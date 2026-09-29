@@ -1,0 +1,47 @@
+diff --git a/sklearn/feature_selection/mutual_info_.py b/sklearn/feature_selection/mutual_info_.py
+index d5d1b7f..7a760d1 100644
+--- a/sklearn/feature_selection/mutual_info_.py
++++ b/sklearn/feature_selection/mutual_info_.py
+@@ -247,7 +247,7 @@ def _estimate_mi(X, y, discrete_features='auto', discrete_target=False,
+     X, y = check_X_y(X, y, accept_sparse='csc', y_numeric=not discrete_target)
+     n_samples, n_features = X.shape
+ 
+-    if discrete_features == 'auto':
++    if isinstance(discrete_features, str) and discrete_features == 'auto':
+         discrete_features = issparse(X)
+ 
+     if isinstance(discrete_features, bool):
+diff --git a/sklearn/feature_selection/tests/test_mutual_info.py b/sklearn/feature_selection/tests/test_mutual_info.py
+index 7ba7d37..4302b34 100644
+--- a/sklearn/feature_selection/tests/test_mutual_info.py
++++ b/sklearn/feature_selection/tests/test_mutual_info.py
+@@ -1,4 +1,6 @@
+ 
++import warnings
++
+ import numpy as np
+ from scipy.sparse import csr_matrix
+ 
+@@ -125,6 +127,22 @@ def test_mutual_info_classif_discrete():
+     assert_array_equal(np.argsort(-mi), np.array([0, 2, 1]))
+ 
+ 
++def test_mutual_info_classif_discrete_features_array():
++    X = np.array([[0, 1], [1, 0], [0, 1], [1, 0]])
++    y = np.array([0, 1, 0, 1])
++    expected = mutual_info_classif(X, y, discrete_features=True)
++
++    with warnings.catch_warnings():
++        warnings.simplefilter('error', FutureWarning)
++        mi_indices = mutual_info_classif(
++            X, y, discrete_features=np.array([0, 1]))
++        mi_mask = mutual_info_classif(
++            X, y, discrete_features=np.array([True, True]))
++
++    assert_array_equal(mi_indices, expected)
++    assert_array_equal(mi_mask, expected)
++
++
+ def test_mutual_info_regression():
+     # We generate sample from multivariate normal distribution, using
+     # transformation from initially uncorrelated variables. The zero

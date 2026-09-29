@@ -1,0 +1,33 @@
+diff --git a/django/db/models/lookups.py b/django/db/models/lookups.py
+index 9344979..49664f5 100644
+--- a/django/db/models/lookups.py
++++ b/django/db/models/lookups.py
+@@ -463,6 +463,8 @@ class IsNull(BuiltinLookup):
+     prepare_rhs = False
+ 
+     def as_sql(self, compiler, connection):
++        if not isinstance(self.rhs, bool):
++            raise ValueError('The QuerySet value for an isnull lookup must be True or False.')
+         sql, params = compiler.compile(self.lhs)
+         if self.rhs:
+             return "%s IS NULL" % sql, params
+diff --git a/tests/queries/tests.py b/tests/queries/tests.py
+index 081fb89..192a293 100644
+--- a/tests/queries/tests.py
++++ b/tests/queries/tests.py
+@@ -2598,6 +2598,15 @@ class ToFieldTests(TestCase):
+ 
+ 
+ class IsNullTests(TestCase):
++    def test_isnull_requires_boolean(self):
++        message = 'The QuerySet value for an isnull lookup must be True or False.'
++        for lookup in ('name__isnull', 'parent__parent__isnull'):
++            for value in (1, 0, 'yes'):
++                with self.subTest(lookup=lookup, value=value):
++                    query = Tag.objects.filter(**{lookup: value})
++                    with self.assertRaisesMessage(ValueError, message):
++                        str(query.query)
++
+     def test_primary_key(self):
+         custom = CustomPk.objects.create(name='pk')
+         null = Related.objects.create()

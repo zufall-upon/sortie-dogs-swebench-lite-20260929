@@ -1,0 +1,42 @@
+diff --git a/lib/matplotlib/__init__.py b/lib/matplotlib/__init__.py
+index b657a35..9f09c17 100644
+--- a/lib/matplotlib/__init__.py
++++ b/lib/matplotlib/__init__.py
+@@ -148,6 +148,10 @@ def __getattr__(name):
+         else:  # Get the version from the _version.py setuptools_scm file.
+             __version__ = _version.version
+         return __version__
++    if name == "version_info":
++        global version_info  # cache it.
++        version_info = parse_version(sys.modules[__name__].__version__).release
++        return version_info
+     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+ 
+ 
+diff --git a/lib/matplotlib/tests/test_matplotlib.py b/lib/matplotlib/tests/test_matplotlib.py
+index cad9433..9ae790a 100644
+--- a/lib/matplotlib/tests/test_matplotlib.py
++++ b/lib/matplotlib/tests/test_matplotlib.py
+@@ -3,10 +3,22 @@ import subprocess
+ import sys
+ 
+ import pytest
++from packaging.version import parse as parse_version
+ 
+ import matplotlib
+ 
+ 
++def test_version_info():
++    assert matplotlib.version_info == parse_version(matplotlib.__version__).release
++
++
++def test_version_info_uses_cached_version(monkeypatch):
++    _ = matplotlib.__version__  # Cache it via a public attribute lookup.
++    monkeypatch.setattr(matplotlib, "__version__", "1.2.3")
++    monkeypatch.delitem(matplotlib.__dict__, "version_info", raising=False)
++    assert matplotlib.version_info == (1, 2, 3)
++
++
+ @pytest.mark.skipif(
+     os.name == "nt", reason="chmod() doesn't work as is on Windows")
+ @pytest.mark.skipif(os.name != "nt" and os.geteuid() == 0,

@@ -1,0 +1,50 @@
+diff --git a/sklearn/utils/multiclass.py b/sklearn/utils/multiclass.py
+index 5eaef2f..fbecf25 100644
+--- a/sklearn/utils/multiclass.py
++++ b/sklearn/utils/multiclass.py
+@@ -306,7 +306,13 @@ def type_of_target(y, input_name=""):
+         warnings.simplefilter("error", np.VisibleDeprecationWarning)
+         if not issparse(y):
+             try:
+-                y = xp.asarray(y)
++                # Pandas nullable dtypes are converted to object arrays by
++                # default. Use their underlying NumPy dtype when available.
++                dtype = getattr(getattr(y, "dtype", None), "numpy_dtype", None)
++                if dtype is None:
++                    y = xp.asarray(y)
++                else:
++                    y = xp.asarray(y, dtype=dtype)
+             except (np.VisibleDeprecationWarning, ValueError):
+                 # dtype=object should be provided explicitly for ragged arrays,
+                 # see NEP 34
+diff --git a/sklearn/utils/tests/test_multiclass.py b/sklearn/utils/tests/test_multiclass.py
+index cf5858d..7984695 100644
+--- a/sklearn/utils/tests/test_multiclass.py
++++ b/sklearn/utils/tests/test_multiclass.py
+@@ -204,6 +204,26 @@ def test_unique_labels():
+     assert_array_equal(unique_labels(np.ones((4, 5)), np.ones((5, 5))), np.arange(5))
+ 
+ 
++def test_unique_labels_pandas_nullable_dtypes():
++    pd = pytest.importorskip("pandas")
++    y_true_values = [1, 0, 0, 1, 0, 1, 1, 0, 1]
++    y_predicted = pd.Series([0, 0, 1, 1, 0, 1, 1, 1, 1], dtype="int64")
++
++    for nullable_dtype, numpy_dtype in [
++        ("Int64", "int64"),
++        ("Float64", "float64"),
++        ("boolean", "bool"),
++    ]:
++        y_true = pd.Series(y_true_values, dtype=nullable_dtype)
++        y_true_nonnullable = pd.Series(y_true_values, dtype=numpy_dtype)
++
++        assert type_of_target(y_true) == type_of_target(y_true_nonnullable)
++        assert_array_equal(
++            unique_labels(y_true, y_predicted),
++            unique_labels(y_true_nonnullable, y_predicted),
++        )
++
++
+ def test_unique_labels_non_specific():
+     # Test unique_labels with a variety of collected examples
+ 

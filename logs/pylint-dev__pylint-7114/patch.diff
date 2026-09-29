@@ -1,0 +1,76 @@
+diff --git a/pylint/lint/expand_modules.py b/pylint/lint/expand_modules.py
+index 289e1af..773ca50 100644
+--- a/pylint/lint/expand_modules.py
++++ b/pylint/lint/expand_modules.py
+@@ -30,7 +30,9 @@ def get_python_path(filepath: str) -> str:
+     This is not true since python 3.3 and is causing problem.
+     """
+     dirname = os.path.realpath(os.path.expanduser(filepath))
+-    if not os.path.isdir(dirname):
++    if not os.path.isdir(dirname) or not os.path.exists(
++        os.path.join(dirname, "__init__.py")
++    ):
+         dirname = os.path.dirname(dirname)
+     while True:
+         if not os.path.exists(os.path.join(dirname, "__init__.py")):
+diff --git a/tests/lint/unittest_expand_modules.py b/tests/lint/unittest_expand_modules.py
+index 15f72d0..ccd31ce 100644
+--- a/tests/lint/unittest_expand_modules.py
++++ b/tests/lint/unittest_expand_modules.py
+@@ -155,3 +155,34 @@ class TestExpandModules(CheckerTestCase):
+         modules.sort(key=lambda d: d["name"])
+         assert modules == expected
+         assert not errors
++
++
++def test_expand_namespace_directory_with_module_name_collision(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    namespace = tmp_path / "a"
++    namespace.mkdir()
++    (namespace / "a.py").touch()
++    (namespace / "b.py").touch()
++    monkeypatch.chdir(tmp_path)
++
++    modules, errors = expand_modules(["a"], [], [], [])
++    modules.sort(key=lambda module: module["name"])
++
++    assert not errors
++    assert modules == [
++        {
++            "basename": "a",
++            "basepath": str(Path("a") / "__init__.py"),
++            "isarg": False,
++            "name": "a.a",
++            "path": str(Path("a") / "a.py"),
++        },
++        {
++            "basename": "a",
++            "basepath": str(Path("a") / "__init__.py"),
++            "isarg": False,
++            "name": "a.b",
++            "path": str(Path("a") / "b.py"),
++        },
++    ]
+diff --git a/tests/lint/unittest_lint.py b/tests/lint/unittest_lint.py
+index c9407bb..5220905 100644
+--- a/tests/lint/unittest_lint.py
++++ b/tests/lint/unittest_lint.py
+@@ -942,3 +942,17 @@ def test_lint_namespace_package_under_dir(initialized_linter: PyLinter) -> None:
+         create_files(["outer/namespace/__init__.py", "outer/namespace/module.py"])
+         linter.check(["outer.namespace"])
+     assert not linter.stats.by_msg
++
++
++def test_import_from_namespace_directory_does_not_report_missing_modules(
++    initialized_linter: PyLinter,
++) -> None:
++    linter = initialized_linter
++    with tempdir():
++        create_files(["a/a.py", "a/b.py", "r.py"])
++        with open("r.py", "w", encoding="utf-8") as module:
++            module.write("from a import b\n")
++        linter.check(["r.py", "a"])
++
++    assert "no-name-in-module" not in linter.stats.by_msg
++    assert "parse-error" not in linter.stats.by_msg

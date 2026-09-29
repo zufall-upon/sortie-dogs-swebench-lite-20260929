@@ -1,0 +1,39 @@
+diff --git a/sklearn/preprocessing/_encoders.py b/sklearn/preprocessing/_encoders.py
+index 1e05aba..c9f4fce 100644
+--- a/sklearn/preprocessing/_encoders.py
++++ b/sklearn/preprocessing/_encoders.py
+@@ -111,6 +111,8 @@ class _BaseEncoder(BaseEstimator, TransformerMixin):
+                     # removed later.
+                     X_mask[:, i] = valid_mask
+                     Xi = Xi.copy()
++                    if Xi.dtype.kind in 'US':
++                        Xi = Xi.astype(self.categories_[i].dtype)
+                     Xi[~valid_mask] = self.categories_[i][0]
+             _, encoded = _encode(Xi, self.categories_[i], encode=True)
+             X_int[:, i] = encoded
+diff --git a/sklearn/preprocessing/tests/test_encoders.py b/sklearn/preprocessing/tests/test_encoders.py
+index d5ac50a..4695214 100644
+--- a/sklearn/preprocessing/tests/test_encoders.py
++++ b/sklearn/preprocessing/tests/test_encoders.py
+@@ -251,6 +251,21 @@ def test_one_hot_encoder_handle_unknown():
+     assert_raises(ValueError, oh.fit, X)
+ 
+ 
++def test_one_hot_encoder_handle_unknown_numpy_string_dtype():
++    train = np.array(['22', '333', '4444', '11111111']).reshape((-1, 1))
++    test = np.array(['55555', '22']).reshape((-1, 1))
++
++    oh = OneHotEncoder(dtype=bool, handle_unknown='ignore')
++    oh.fit(train)
++    transformed = oh.transform(test)
++
++    expected = np.zeros((2, 4), dtype=bool)
++    expected[1, 1] = True
++    assert sparse.isspmatrix_csr(transformed)
++    assert transformed.dtype == np.bool_
++    assert_array_equal(transformed.toarray(), expected)
++
++
+ def test_one_hot_encoder_not_fitted():
+     X = np.array([['a'], ['b']])
+     enc = OneHotEncoder(categories=['a', 'b'])

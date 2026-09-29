@@ -1,0 +1,158 @@
+diff --git a/doc/usage/extensions/autodoc.rst b/doc/usage/extensions/autodoc.rst
+index e3d551d..4a3ea7e 100644
+--- a/doc/usage/extensions/autodoc.rst
++++ b/doc/usage/extensions/autodoc.rst
+@@ -252,9 +252,9 @@ inserting them into the page source under a suitable :rst:dir:`py:module`,
+      This can be combined with ``undoc-members`` to document *all* available
+      members of the class or module.
+ 
+-     It can take an ancestor class not to document inherited members from it.
+-     By default, members of ``object`` class are not documented.  To show them
+-     all, give ``None`` to the option.
++     It can take one or more ancestor class names, separated by commas, to
++     exclude their inherited members.  By default, members of ``object`` class
++     are not documented.  To show them all, give ``None`` to the option.
+ 
+      For example; If your class ``Foo`` is derived from ``list`` class and
+      you don't want to document ``list.__len__()``, you should specify a
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 62631f7..4141fc4 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -109,12 +109,14 @@ def exclude_members_option(arg: Any) -> Union[object, Set[str]]:
+     return {x.strip() for x in arg.split(',') if x.strip()}
+ 
+ 
+-def inherited_members_option(arg: Any) -> Union[object, Set[str]]:
+-    """Used to convert the :members: option to auto directives."""
++def inherited_members_option(arg: Any) -> Set[str]:
++    """Used to convert the :inherited-members: option to auto directives."""
+     if arg in (None, True):
+-        return 'object'
++        return {'object'}
++    elif arg is False:
++        return set()
+     else:
+-        return arg
++        return {x.strip() for x in arg.split(',') if x.strip()}
+ 
+ 
+ def member_order_option(arg: Any) -> Optional[str]:
+@@ -682,15 +684,17 @@ class Documenter:
+         def is_filtered_inherited_member(name: str, obj: Any) -> bool:
+             if inspect.isclass(self.object):
+                 for cls in self.object.__mro__:
+-                    if cls.__name__ == self.options.inherited_members and cls != self.object:
+-                        # given member is a member of specified *super class*
+-                        return True
+-                    elif name in cls.__dict__:
+-                        return False
+-                    elif name in self.get_attr(cls, '__annotations__', {}):
+-                        return False
+-                    elif isinstance(obj, ObjectMember) and obj.class_ is cls:
+-                        return False
++                    if (name in cls.__dict__ or
++                            name in self.get_attr(cls, '__annotations__', {}) or
++                            isinstance(obj, ObjectMember) and obj.class_ is cls):
++                        # Exclude the named class and its ancestors, but not
++                        # unrelated sibling bases that follow it in the MRO.
++                        return (
++                            cls != self.object and
++                            any(base.__name__ in self.options.inherited_members and
++                                cls in base.__mro__
++                                for base in self.object.__mro__[1:])
++                        )
+ 
+             return False
+ 
+diff --git a/tests/roots/test-ext-autodoc/target/inheritance.py b/tests/roots/test-ext-autodoc/target/inheritance.py
+index ffac84b..70ba02b 100644
+--- a/tests/roots/test-ext-autodoc/target/inheritance.py
++++ b/tests/roots/test-ext-autodoc/target/inheritance.py
+@@ -15,3 +15,46 @@ class Derived(Base):
+     def inheritedmeth(self):
+         # no docstring here
+         pass
++
++
++class Grandparent(object):
++    def inherited_from_grandparent(self):
++        """Inherited from Grandparent."""
++
++
++class BaseA(Grandparent):
++    def inherited_from_base_a(self):
++        """Inherited from BaseA."""
++
++
++class AncestorDerived(BaseA):
++    pass
++
++
++class BaseB(object):
++    def inherited_from_base_b(self):
++        """Inherited from BaseB."""
++
++
++class BaseC(object):
++    def inherited_from_base_c(self):
++        """Inherited from BaseC."""
++
++
++class MultiDerived(BaseA, BaseB):
++    def ownmethod(self):
++        """Defined on MultiDerived."""
++
++
++class AnotherDerived(BaseA, BaseC):
++    """Another class inheriting from BaseA and BaseC."""
++
++    def another_ownmethod(self):
++        """Defined on AnotherDerived."""
++
++
++class YetAnotherDerived(BaseB, BaseC):
++    """A class inheriting from BaseB and BaseC."""
++
++    def yet_another_ownmethod(self):
++        """Defined on YetAnotherDerived."""
+diff --git a/tests/test_ext_autodoc.py b/tests/test_ext_autodoc.py
+index 1f1c7e9..8480332 100644
+--- a/tests/test_ext_autodoc.py
++++ b/tests/test_ext_autodoc.py
+@@ -794,6 +794,35 @@ def test_autodoc_inherited_members_None(app):
+     assert '   .. py:method:: Derived.__str__()' in actual
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_autodoc_inherited_members_multiple(app):
++    actual = do_autodoc(app, 'class', 'target.inheritance.AncestorDerived', {
++        "members": None,
++        "inherited-members": "BaseA",
++    })
++    assert not any('AncestorDerived.inherited_from_grandparent' in line for line in actual)
++
++    options = {"members": None,
++               "inherited-members": "BaseA, BaseB"}
++
++    actual = do_autodoc(app, 'class', 'target.inheritance.MultiDerived', options)
++    assert '   .. py:method:: MultiDerived.ownmethod()' in actual
++    assert not any('MultiDerived.inherited_from_base_a' in line for line in actual)
++    assert not any('MultiDerived.inherited_from_base_b' in line for line in actual)
++    assert not any('MultiDerived.inherited_from_grandparent' in line for line in actual)
++
++    actual = do_autodoc(app, 'module', 'target.inheritance', options)
++    for classname, ownmethod, excluded_method in (
++        ('AnotherDerived', 'another_ownmethod', 'inherited_from_base_a'),
++        ('YetAnotherDerived', 'yet_another_ownmethod', 'inherited_from_base_b'),
++    ):
++        assert any(f'py:class:: {classname}' in line for line in actual)
++        assert any(f'{classname}.{ownmethod}' in line for line in actual)
++        assert any(f'{classname}.inherited_from_base_c' in line for line in actual)
++        assert not any(f'{classname}.{excluded_method}' in line for line in actual)
++    assert not any('AnotherDerived.inherited_from_grandparent' in line for line in actual)
++
++
+ @pytest.mark.sphinx('html', testroot='ext-autodoc')
+ def test_autodoc_imported_members(app):
+     options = {"members": None,

@@ -1,0 +1,42 @@
+diff --git a/sympy/physics/quantum/tensorproduct.py b/sympy/physics/quantum/tensorproduct.py
+index 78accaf..0cbdb9c 100644
+--- a/sympy/physics/quantum/tensorproduct.py
++++ b/sympy/physics/quantum/tensorproduct.py
+@@ -248,6 +248,12 @@ def _eval_expand_tensorproduct(self, **hints):
+                     tp = TensorProduct(*args[:i] + (aa,) + args[i + 1:])
+                     if isinstance(tp, TensorProduct):
+                         tp = tp._eval_expand_tensorproduct()
++                    elif isinstance(tp, Mul):
++                        c_part, nc_part = tp.args_cnc()
++                        if (len(nc_part) == 1 and
++                                isinstance(nc_part[0], TensorProduct)):
++                            tp = (Mul(*c_part) *
++                                  nc_part[0]._eval_expand_tensorproduct())
+                     add_args.append(tp)
+                 break
+ 
+diff --git a/sympy/physics/quantum/tests/test_tensorproduct.py b/sympy/physics/quantum/tests/test_tensorproduct.py
+index f176564..79515c5 100644
+--- a/sympy/physics/quantum/tests/test_tensorproduct.py
++++ b/sympy/physics/quantum/tests/test_tensorproduct.py
+@@ -9,7 +9,7 @@
+ from sympy.physics.quantum.tensorproduct import tensor_product_simp
+ from sympy.physics.quantum.dagger import Dagger
+ from sympy.physics.quantum.qubit import Qubit, QubitBra
+-from sympy.physics.quantum.operator import OuterProduct
++from sympy.physics.quantum.operator import OuterProduct, Operator
+ from sympy.physics.quantum.density import Density
+ from sympy.physics.quantum.trace import Tr
+ 
+@@ -45,6 +45,11 @@ def test_tensor_product_expand():
+     assert TP(A + B, B + C).expand(tensorproduct=True) == \
+         TP(A, B) + TP(A, C) + TP(B, B) + TP(B, C)
+ 
++    U, V = Operator('U'), Operator('V')
++    assert TP(2*U - V, U + V).expand(tensorproduct=True) == \
++        2*TP(U, U) + 2*TP(U, V) - TP(V, U) - TP(V, V)
++    assert TP(0, U + V).expand(tensorproduct=True) == 0
++
+ 
+ def test_tensor_product_commutator():
+     assert TP(Comm(A, B), C).doit().expand(tensorproduct=True) == \

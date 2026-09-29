@@ -1,0 +1,47 @@
+diff --git a/sphinx/domains/std.py b/sphinx/domains/std.py
+index c87217c..6fc16b2 100644
+--- a/sphinx/domains/std.py
++++ b/sphinx/domains/std.py
+@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
+ 
+ 
+ # RE for option descriptions
+-option_desc_re = re.compile(r'((?:/|--|-|\+)?[^\s=[]+)(=?\s*.*)')
++option_desc_re = re.compile(r'((?:/|--|-|\+)?(?:\[[^\[\]\s]+\])?[^\s=[]+)(=?\s*.*)')
+ # RE for grammar tokens
+ token_re = re.compile(r'`(\w+)`', re.U)
+ 
+diff --git a/tests/test_domain_std.py b/tests/test_domain_std.py
+index 7ee1d6c..885d85e 100644
+--- a/tests/test_domain_std.py
++++ b/tests/test_domain_std.py
+@@ -303,6 +303,29 @@ def test_cmdoption(app):
+     assert domain.progoptions[('ls', '-l')] == ('index', 'cmdoption-ls-l')
+ 
+ 
++def test_cmdoption_optional_prefix(app, warning):
++    text = (".. option:: [enable=]PATTERN\n"
++            "\n"
++            "   Immediately enable events matching *PATTERN*\n")
++    doctree = restructuredtext.parse(app, text)
++
++    signode = doctree[1][0]
++    assert signode.astext() == '[enable=]PATTERN'
++    assert signode['allnames'] == ['[enable=]PATTERN']
++    assert doctree[1][1].astext() == 'Immediately enable events matching PATTERN'
++    assert 'Malformed option description' not in warning.getvalue()
++
++
++@pytest.mark.parametrize('option', ['[foo bar]ARG', '[foo[bar]ARG'])
++def test_cmdoption_optional_prefix_rejects_whitespace(app, warning, option):
++    doctree = restructuredtext.parse(app, ".. option:: %s\n" % option)
++
++    assert 'Malformed option description %r' % option in warning.getvalue()
++    assert doctree[1][0].astext() == option
++    assert 'allnames' not in doctree[1][0]
++    assert not app.env.get_domain('std').progoptions
++
++
+ def test_multiple_cmdoptions(app):
+     text = (".. program:: cmd\n"
+             "\n"

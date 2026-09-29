@@ -1,0 +1,57 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index d85d796..c9f90ac 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1074,7 +1074,7 @@ class ModuleDocumenter(Documenter):
+     def get_object_members(self, want_all: bool) -> Tuple[bool, ObjectMembers]:
+         members = self.get_module_members()
+         if want_all:
+-            if not self.__all__:
++            if self.__all__ is None:
+                 # for implicit module members, check __module__ to avoid
+                 # documenting imported objects
+                 return True, list(members.values())
+diff --git a/tests/roots/test-ext-autodoc/example.py b/tests/roots/test-ext-autodoc/example.py
+new file mode 100644
+index 0000000..2c00fc9
+--- /dev/null
++++ b/tests/roots/test-ext-autodoc/example.py
+@@ -0,0 +1,13 @@
++__all__ = []
++
++
++def foo():
++    """Documented foo."""
++
++
++def bar():
++    """Documented bar."""
++
++
++def baz():
++    """Documented baz."""
+diff --git a/tests/test_ext_autodoc.py b/tests/test_ext_autodoc.py
+index 39897eb..bbe0af4 100644
+--- a/tests/test_ext_autodoc.py
++++ b/tests/test_ext_autodoc.py
+@@ -738,6 +738,20 @@ def test_autodoc_ignore_module_all(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_autodoc_empty_module_all(app):
++    options = {"members": None}
++    actual = do_autodoc(app, 'module', 'example', options)
++    assert list(filter(lambda l: '::' in l, actual)) == [
++        '.. py:module:: example',
++    ]
++
++    # Modules without __all__ should still use implicit member selection.
++    options = {"members": None, "undoc-members": None}
++    actual = do_autodoc(app, 'module', 'target.abstractmethods', options)
++    assert '.. py:class:: Base()' in actual
++
++
+ @pytest.mark.sphinx('html', testroot='ext-autodoc')
+ def test_autodoc_noindex(app):
+     options = {"noindex": True}

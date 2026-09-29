@@ -1,0 +1,274 @@
+diff --git a/sphinx/ext/autosummary/generate.py b/sphinx/ext/autosummary/generate.py
+index a57c73f..f79783e 100644
+--- a/sphinx/ext/autosummary/generate.py
++++ b/sphinx/ext/autosummary/generate.py
+@@ -27,6 +27,7 @@ import sys
+ import warnings
+ from gettext import NullTranslations
+ from os import path
++from types import ModuleType
+ from typing import Any, Callable, Dict, List, NamedTuple, Set, Tuple, Union
+ 
+ from jinja2 import TemplateNotFound
+@@ -43,6 +44,7 @@ from sphinx.ext.autodoc import Documenter
+ from sphinx.ext.autosummary import import_by_name, get_documenter
+ from sphinx.locale import __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
++from sphinx.pycode.ast import ast
+ from sphinx.registry import SphinxComponentRegistry
+ from sphinx.util import logging
+ from sphinx.util import rst
+@@ -219,6 +221,103 @@ def generate_autosummary_content(name: str, obj: Any, parent: Any,
+                             public.append(name)
+         return public, items
+ 
++    def get_module_members(obj: Any) -> List[str]:
++        members = dir(obj)
++        if imported_members:
++            return members
++
++        try:
++            analyzer = ModuleAnalyzer.for_module(name)
++            tree = ast.parse(analyzer.code)
++        except (PycodeError, SyntaxError):
++            imported = {}  # type: Dict[str, List[Any]]
++        else:
++            class ImportFinder(ast.NodeVisitor):
++                def __init__(self) -> None:
++                    self.imported = {}  # type: Dict[str, List[Any]]
++
++                def remember_import(self, name: str, value: Any) -> None:
++                    self.imported.setdefault(name, []).append(value)
++
++                def get_import_module(self, node: Any) -> Any:
++                    module_name = node.module or ''
++                    if node.level:
++                        package = getattr(obj, '__package__', None)
++                        if not package:
++                            package = obj.__name__.rpartition('.')[0]
++                        parts = package.split('.') if package else []
++                        if node.level > len(parts):
++                            return None
++                        package = '.'.join(parts[:len(parts) - node.level + 1])
++                        module_name = '.'.join(filter(None, (package, module_name)))
++                    return sys.modules.get(module_name)
++
++                def visit_Import(self, node: Any) -> None:
++                    for alias in node.names:
++                        name = alias.asname or alias.name.split('.')[0]
++                        module_name = alias.name if alias.asname else name
++                        module = sys.modules.get(module_name)
++                        if module is not None:
++                            self.remember_import(name, module)
++
++                def visit_ImportFrom(self, node: Any) -> None:
++                    module = self.get_import_module(node)
++                    for alias in node.names:
++                        if module is None:
++                            continue
++                        if alias.name == '*':
++                            names = safe_getattr(module, '__all__', None)
++                            if names is None:
++                                names = [name for name in vars(module)
++                                         if not name.startswith('_')]
++                            try:
++                                names = iter(names)
++                            except TypeError:
++                                continue
++                        else:
++                            names = [alias.name]
++                        for name in names:
++                            if not isinstance(name, str):
++                                continue
++                            try:
++                                value = safe_getattr(module, name)
++                            except AttributeError:
++                                submodule = sys.modules.get(module.__name__ + '.' + name)
++                                if submodule is None:
++                                    continue
++                                value = submodule
++                            imported_name = name if alias.name == '*' else \
++                                alias.asname or alias.name
++                            self.remember_import(imported_name, value)
++
++                def visit_FunctionDef(self, node: Any) -> None:
++                    pass
++
++                def visit_AsyncFunctionDef(self, node: Any) -> None:
++                    pass
++
++                def visit_ClassDef(self, node: Any) -> None:
++                    pass
++
++            finder = ImportFinder()
++            finder.visit(tree)
++            imported = finder.imported
++
++        def is_local_member(member: str) -> bool:
++            try:
++                value = safe_getattr(obj, member)
++            except AttributeError:
++                return True
++
++            if any(value is imported_value for imported_value in imported.get(member, [])):
++                return False
++
++            if isinstance(value, ModuleType):
++                return getattr(value, '__name__', None) == obj.__name__
++            return getattr(value, '__module__', obj.__name__) == obj.__name__
++
++        return [member for member in members if is_local_member(member)]
++
+     def get_module_attrs(members: Any) -> Tuple[List[str], List[str]]:
+         """Find module attributes with docstrings."""
+         attrs, public = [], []
+@@ -246,7 +345,7 @@ def generate_autosummary_content(name: str, obj: Any, parent: Any,
+     ns.update(context)
+ 
+     if doc.objtype == 'module':
+-        ns['members'] = dir(obj)
++        ns['members'] = get_module_members(obj)
+         ns['functions'], ns['all_functions'] = \
+             get_members(obj, {'function'}, imported=imported_members)
+         ns['classes'], ns['all_classes'] = \
+diff --git a/tests/roots/test-ext-autosummary-module-members/_templates/autosummary/module.rst b/tests/roots/test-ext-autosummary-module-members/_templates/autosummary/module.rst
+new file mode 100644
+index 0000000..e9329e1
+--- /dev/null
++++ b/tests/roots/test-ext-autosummary-module-members/_templates/autosummary/module.rst
+@@ -0,0 +1,8 @@
++{{ fullname | escape | underline }}
++
++.. automodule:: {{ fullname }}
++
++   .. autosummary::
++   {% for item in members %}
++      {{ item }}
++   {%- endfor %}
+diff --git a/tests/roots/test-ext-autosummary-module-members/conf.py b/tests/roots/test-ext-autosummary-module-members/conf.py
+new file mode 100644
+index 0000000..1730f33
+--- /dev/null
++++ b/tests/roots/test-ext-autosummary-module-members/conf.py
+@@ -0,0 +1,9 @@
++import os
++import sys
++
++sys.path.insert(0, os.path.abspath('.'))
++
++extensions = ['sphinx.ext.autosummary']
++templates_path = ['_templates']
++autosummary_generate = True
++autosummary_imported_members = False
+diff --git a/tests/roots/test-ext-autosummary-module-members/example.py b/tests/roots/test-ext-autosummary-module-members/example.py
+new file mode 100644
+index 0000000..2983d3e
+--- /dev/null
++++ b/tests/roots/test-ext-autosummary-module-members/example.py
+@@ -0,0 +1,18 @@
++import os
++from os import sep
++from os import sep as aliased_sep
++from os import linesep as rebound_scalar
++from os import sep as dead_branch_sep
++from exporter import *
++from public_exporter import *
++
++if False:
++    dead_branch_sep = 'local'
++
++rebound_scalar = 'locally rebound'
++local_scalar = 42
++
++
++def local_function():
++    """A locally defined function."""
++    pass
+diff --git a/tests/roots/test-ext-autosummary-module-members/exporter.py b/tests/roots/test-ext-autosummary-module-members/exporter.py
+new file mode 100644
+index 0000000..4e005d5
+--- /dev/null
++++ b/tests/roots/test-ext-autosummary-module-members/exporter.py
+@@ -0,0 +1,3 @@
++__all__ = ['exported_scalar']
++
++exported_scalar = 42
+diff --git a/tests/roots/test-ext-autosummary-module-members/index.rst b/tests/roots/test-ext-autosummary-module-members/index.rst
+new file mode 100644
+index 0000000..7dcee5d
+--- /dev/null
++++ b/tests/roots/test-ext-autosummary-module-members/index.rst
+@@ -0,0 +1,7 @@
++Autosummary module members reproduction
++========================================
++
++.. autosummary::
++   :toctree: generated
++
++   example
+diff --git a/tests/roots/test-ext-autosummary-module-members/public_exporter.py b/tests/roots/test-ext-autosummary-module-members/public_exporter.py
+new file mode 100644
+index 0000000..f64d6fc
+--- /dev/null
++++ b/tests/roots/test-ext-autosummary-module-members/public_exporter.py
+@@ -0,0 +1,2 @@
++public_exported_scalar = 43
++_private_exported_scalar = 44
+diff --git a/tests/test_ext_autosummary.py b/tests/test_ext_autosummary.py
+index 166029c..5153272 100644
+--- a/tests/test_ext_autosummary.py
++++ b/tests/test_ext_autosummary.py
+@@ -366,6 +366,53 @@ def test_autosummary_imported_members(app, status, warning):
+         sys.modules.pop('autosummary_dummy_package', None)
+ 
+ 
++@pytest.mark.sphinx('dummy', testroot='ext-autosummary-module-members')
++def test_autosummary_module_members(app):
++    try:
++        app.build()
++
++        module = (app.srcdir / 'generated' / 'example.rst').read_text()
++        members = {line.strip() for line in module.splitlines()
++                   if line.startswith('      ')}
++        assert 'os' not in members
++        assert 'sep' not in members
++        assert 'aliased_sep' not in members
++        assert 'exported_scalar' not in members
++        assert 'public_exported_scalar' not in members
++        assert 'dead_branch_sep' not in members
++        assert 'local_function' in members
++        assert 'local_scalar' in members
++        assert 'rebound_scalar' in members
++    finally:
++        sys.modules.pop('example', None)
++        sys.modules.pop('exporter', None)
++        sys.modules.pop('public_exporter', None)
++
++
++@pytest.mark.sphinx('dummy', testroot='ext-autosummary-module-members',
++                    confoverrides={'autosummary_imported_members': True})
++def test_autosummary_module_members_with_imported_members(app):
++    try:
++        app.build()
++
++        module = (app.srcdir / 'generated' / 'example.rst').read_text()
++        members = {line.strip() for line in module.splitlines()
++                   if line.startswith('      ')}
++        assert 'os' in members
++        assert 'sep' in members
++        assert 'aliased_sep' in members
++        assert 'dead_branch_sep' in members
++        assert 'exported_scalar' in members
++        assert 'public_exported_scalar' in members
++        assert 'local_function' in members
++        assert 'local_scalar' in members
++        assert 'rebound_scalar' in members
++    finally:
++        sys.modules.pop('example', None)
++        sys.modules.pop('exporter', None)
++        sys.modules.pop('public_exporter', None)
++
++
+ @pytest.mark.sphinx(testroot='ext-autodoc',
+                     confoverrides={'extensions': ['sphinx.ext.autosummary']})
+ def test_generate_autosummary_docs_property(app):

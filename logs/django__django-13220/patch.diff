@@ -1,0 +1,91 @@
+diff --git a/django/core/exceptions.py b/django/core/exceptions.py
+index dc084b8..3769f31 100644
+--- a/django/core/exceptions.py
++++ b/django/core/exceptions.py
+@@ -182,6 +182,38 @@ class ValidationError(Exception):
+     def __repr__(self):
+         return 'ValidationError(%s)' % self
+ 
++    def __eq__(self, other):
++        if not isinstance(other, ValidationError):
++            return NotImplemented
++        if hasattr(self, 'error_dict') != hasattr(other, 'error_dict'):
++            return False
++        if hasattr(self, 'error_dict'):
++            if self.error_dict.keys() != other.error_dict.keys():
++                return False
++            return all(
++                self._errors_equal(self.error_dict[field], other.error_dict[field])
++                for field in self.error_dict
++            )
++        return self._errors_equal(self.error_list, other.error_list)
++
++    @staticmethod
++    def _errors_equal(errors, other_errors):
++        if len(errors) != len(other_errors):
++            return False
++        unmatched = list(other_errors)
++        for error in errors:
++            for index, other_error in enumerate(unmatched):
++                if (
++                    error.message == other_error.message and
++                    error.code == other_error.code and
++                    error.params == other_error.params
++                ):
++                    unmatched.pop(index)
++                    break
++            else:
++                return False
++        return True
++
+ 
+ class EmptyResultSet(Exception):
+     """A database query predicate is impossible."""
+diff --git a/tests/test_exceptions/test_validation_error.py b/tests/test_exceptions/test_validation_error.py
+index a0bbfaf..dff4177 100644
+--- a/tests/test_exceptions/test_validation_error.py
++++ b/tests/test_exceptions/test_validation_error.py
+@@ -4,6 +4,43 @@ from django.core.exceptions import ValidationError
+ 
+ 
+ class TestValidationError(unittest.TestCase):
++    def test_equality(self):
++        self.assertEqual(ValidationError('oops'), ValidationError('oops'))
++        self.assertEqual(ValidationError('oops'), ValidationError(['oops']))
++        self.assertNotEqual(ValidationError('oops'), ValidationError('other'))
++        self.assertNotEqual(
++            ValidationError('oops', code='first'),
++            ValidationError('oops', code='second'),
++        )
++        self.assertNotEqual(
++            ValidationError('oops', params={'value': 'first'}),
++            ValidationError('oops', params={'value': 'second'}),
++        )
++
++    def test_equality_of_error_lists_is_order_independent(self):
++        self.assertEqual(
++            ValidationError(['first', 'second']),
++            ValidationError(['second', 'first']),
++        )
++        self.assertNotEqual(
++            ValidationError(['first', 'first']),
++            ValidationError(['first']),
++        )
++
++    def test_equality_of_error_dicts_is_order_independent(self):
++        self.assertEqual(
++            ValidationError({'first': ['one', 'two'], 'second': ['three']}),
++            ValidationError({'second': ['three'], 'first': ['two', 'one']}),
++        )
++        self.assertNotEqual(
++            ValidationError({'first': ['one']}),
++            ValidationError({'second': ['one']}),
++        )
++        self.assertNotEqual(
++            ValidationError({'first': ['one']}),
++            ValidationError(['one']),
++        )
++
+     def test_messages_concatenates_error_dict_values(self):
+         message_dict = {}
+         exception = ValidationError(message_dict)

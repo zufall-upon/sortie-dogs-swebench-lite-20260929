@@ -1,0 +1,73 @@
+diff --git a/django/urls/resolvers.py b/django/urls/resolvers.py
+index 9b00e24..3d253f4 100644
+--- a/django/urls/resolvers.py
++++ b/django/urls/resolvers.py
+@@ -52,6 +52,26 @@ class ResolverMatch:
+             # A function-based view
+             self._func_path = func.__module__ + '.' + func.__name__
+ 
++        self._func_repr = self._func_path
++        if isinstance(func, functools.partial):
++            partial_func = func.func
++            if not hasattr(partial_func, '__name__'):
++                partial_func_path = (
++                    partial_func.__class__.__module__ + '.' +
++                    partial_func.__class__.__name__
++                )
++            else:
++                partial_func_path = partial_func.__module__ + '.' + partial_func.__name__
++            partial_args = [repr(arg) for arg in func.args]
++            partial_args.extend(
++                '%s=%r' % (key, value)
++                for key, value in (func.keywords or {}).items()
++            )
++            self._func_repr = 'functools.partial(%s%s)' % (
++                partial_func_path,
++                ', ' + ', '.join(partial_args) if partial_args else '',
++            )
++
+         view_path = url_name or self._func_path
+         self.view_name = ':'.join(self.namespaces + [view_path])
+ 
+@@ -60,7 +80,7 @@ class ResolverMatch:
+ 
+     def __repr__(self):
+         return "ResolverMatch(func=%s, args=%s, kwargs=%s, url_name=%s, app_names=%s, namespaces=%s, route=%s)" % (
+-            self._func_path, self.args, self.kwargs, self.url_name,
++            self._func_repr, self.args, self.kwargs, self.url_name,
+             self.app_names, self.namespaces, self.route,
+         )
+ 
+diff --git a/tests/urlpatterns_reverse/tests.py b/tests/urlpatterns_reverse/tests.py
+index 09028be..da153db 100644
+--- a/tests/urlpatterns_reverse/tests.py
++++ b/tests/urlpatterns_reverse/tests.py
+@@ -3,6 +3,7 @@ Unit tests for reverse URL lookups.
+ """
+ import sys
+ import threading
++from functools import partial
+ 
+ from admin_scripts.tests import AdminScriptTestCase
+ 
+@@ -1145,6 +1146,20 @@ class ResolverMatchTests(SimpleTestCase):
+             "namespaces=[], route=^no_kwargs/([0-9]+)/([0-9]+)/$)",
+         )
+ 
++    def test_repr_partial(self):
++        func = partial(views.empty_view, 'bound', arg1='value')
++        match = ResolverMatch(func, ('captured',), {'arg2': 'value'})
++        self.assertEqual(
++            repr(match),
++            "ResolverMatch(func=functools.partial(urlpatterns_reverse.views.empty_view, "
++            "'bound', arg1='value'), args=('captured',), kwargs={'arg2': 'value'}, "
++            "url_name=None, app_names=[], namespaces=[], route=None)",
++        )
++        self.assertIs(match.func, func)
++        self.assertEqual(match.args, ('captured',))
++        self.assertEqual(match.kwargs, {'arg2': 'value'})
++        self.assertEqual(match.view_name, 'functools.partial')
++
+ 
+ @override_settings(ROOT_URLCONF='urlpatterns_reverse.erroneous_urls')
+ class ErroneousViewTests(SimpleTestCase):

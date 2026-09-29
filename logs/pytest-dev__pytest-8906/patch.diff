@@ -1,0 +1,71 @@
+diff --git a/src/_pytest/python.py b/src/_pytest/python.py
+index 79dfb73..3fba062 100644
+--- a/src/_pytest/python.py
++++ b/src/_pytest/python.py
+@@ -611,7 +611,8 @@ class Module(nodes.File, PyCollector):
+                 "Using pytest.skip outside of a test is not allowed. "
+                 "To decorate a test function, use the @pytest.mark.skip "
+                 "or @pytest.mark.skipif decorators instead, and to skip a "
+-                "module use `pytestmark = pytest.mark.{skip,skipif}."
++                "module use `pytest.skip(reason, allow_module_level=True)` or "
++                "`pytestmark = pytest.mark.{skip,skipif}."
+             ) from e
+         self.config.pluginmanager.consider_module(mod)
+         return mod
+diff --git a/testing/test_skipping.py b/testing/test_skipping.py
+index 53bf953..9262b83 100644
+--- a/testing/test_skipping.py
++++ b/testing/test_skipping.py
+@@ -1329,20 +1329,29 @@ def test_xfail_item(pytester: Pytester) -> None:
+ 
+ 
+ def test_module_level_skip_error(pytester: Pytester) -> None:
+-    """Verify that using pytest.skip at module level causes a collection error."""
++    """Verify that a module-level skip without the flag explains how to use it."""
+     pytester.makepyfile(
+         """
++        import sys
++
+         import pytest
+-        pytest.skip("skip_module_level")
+ 
+-        def test_func():
+-            assert True
++        # Simulate the version guard used when a module needs newer Python syntax.
++        sys.version_info = (3, 7)
++        if sys.version_info < (3, 8):
++            pytest.skip("Requires Python >= 3.8")
++
++        import incompatible_python_syntax
+     """
+     )
+-    result = pytester.runpytest()
++    result = pytester.runpytest_subprocess()
++    assert result.ret == 2
+     result.stdout.fnmatch_lines(
+         ["*Using pytest.skip outside of a test is not allowed*"]
+     )
++    result.stdout.fnmatch_lines(["*allow_module_level=True*"])
++    result.stdout.fnmatch_lines(["*1 error*"])
++    result.stdout.no_fnmatch_line("*ModuleNotFoundError*")
+ 
+ 
+ def test_module_level_skip_with_allow_module_level(pytester: Pytester) -> None:
+@@ -1358,6 +1367,8 @@ def test_module_level_skip_with_allow_module_level(pytester: Pytester) -> None:
+     )
+     result = pytester.runpytest("-rxs")
+     result.stdout.fnmatch_lines(["*SKIP*skip_module_level"])
++    result.stdout.fnmatch_lines(["*1 skipped*"])
++    assert result.ret == pytest.ExitCode.NO_TESTS_COLLECTED
+ 
+ 
+ def test_invalid_skip_keyword_parameter(pytester: Pytester) -> None:
+@@ -1373,6 +1384,8 @@ def test_invalid_skip_keyword_parameter(pytester: Pytester) -> None:
+     )
+     result = pytester.runpytest()
+     result.stdout.fnmatch_lines(["*TypeError:*['unknown']*"])
++    result.stdout.fnmatch_lines(["*1 error*"])
++    assert result.ret == 2
+ 
+ 
+ def test_mark_xfail_item(pytester: Pytester) -> None:

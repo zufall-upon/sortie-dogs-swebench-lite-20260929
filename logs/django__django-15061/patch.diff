@@ -1,0 +1,73 @@
+diff --git a/django/forms/widgets.py b/django/forms/widgets.py
+index 00c19e2..b6a7e3b 100644
+--- a/django/forms/widgets.py
++++ b/django/forms/widgets.py
+@@ -849,9 +849,8 @@ class MultiWidget(Widget):
+         return context
+ 
+     def id_for_label(self, id_):
+-        if id_:
+-            id_ += '_0'
+-        return id_
++        # A label shouldn't target just the first input.
++        return '' if id_ else id_
+ 
+     def value_from_datadict(self, data, files, name):
+         return [
+diff --git a/tests/forms_tests/field_tests/test_multivaluefield.py b/tests/forms_tests/field_tests/test_multivaluefield.py
+index 22e0892..449bf16 100644
+--- a/tests/forms_tests/field_tests/test_multivaluefield.py
++++ b/tests/forms_tests/field_tests/test_multivaluefield.py
+@@ -141,7 +141,7 @@ class MultiValueFieldTest(SimpleTestCase):
+         self.assertHTMLEqual(
+             form.as_table(),
+             """
+-            <tr><th><label for="id_field1_0">Field1:</label></th>
++            <tr><th><label>Field1:</label></th>
+             <td><input type="text" name="field1_0" id="id_field1_0" required>
+             <select multiple name="field1_1" id="id_field1_1" required>
+             <option value="J">John</option>
+@@ -164,7 +164,7 @@ class MultiValueFieldTest(SimpleTestCase):
+         self.assertHTMLEqual(
+             form.as_table(),
+             """
+-            <tr><th><label for="id_field1_0">Field1:</label></th>
++            <tr><th><label>Field1:</label></th>
+             <td><input type="text" name="field1_0" value="some text" id="id_field1_0" required>
+             <select multiple name="field1_1" id="id_field1_1" required>
+             <option value="J" selected>John</option>
+diff --git a/tests/forms_tests/widget_tests/test_multiwidget.py b/tests/forms_tests/widget_tests/test_multiwidget.py
+index 0e5ee8f..07629de 100644
+--- a/tests/forms_tests/widget_tests/test_multiwidget.py
++++ b/tests/forms_tests/widget_tests/test_multiwidget.py
+@@ -2,7 +2,7 @@ import copy
+ from datetime import datetime
+ 
+ from django.forms import (
+-    CharField, FileInput, MultipleChoiceField, MultiValueField, MultiWidget,
++    CharField, FileInput, Form, MultipleChoiceField, MultiValueField, MultiWidget,
+     RadioSelect, SelectMultiple, SplitDateTimeField, SplitDateTimeWidget,
+     TextInput,
+ )
+@@ -79,6 +79,21 @@ class DeepCopyWidget(MultiWidget):
+ 
+ 
+ class MultiWidgetTest(WidgetTest):
++    def test_label_tag(self):
++        class SomeForm(Form):
++            item = CharField(widget=MultiWidget([TextInput(), TextInput()]))
++
++        form = SomeForm()
++        self.assertHTMLEqual(form['item'].label_tag(), '<label>Item:</label>')
++
++        widget = form.fields['item'].widget
++        self.assertIsNone(widget.id_for_label(None))
++        subwidgets = widget.get_context('item', [None, None], {'id': 'id_item'})['widget']['subwidgets']
++        self.assertEqual(
++            [subwidget['attrs']['id'] for subwidget in subwidgets],
++            ['id_item_0', 'id_item_1'],
++        )
++
+     def test_subwidgets_name(self):
+         widget = MultiWidget(
+             widgets={

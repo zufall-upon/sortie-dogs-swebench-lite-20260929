@@ -1,0 +1,92 @@
+diff --git a/lib/matplotlib/style/core.py b/lib/matplotlib/style/core.py
+index fb0a542..04ee3d8 100644
+--- a/lib/matplotlib/style/core.py
++++ b/lib/matplotlib/style/core.py
+@@ -36,6 +36,24 @@ BASE_LIBRARY_PATH = os.path.join(mpl.get_data_path(), 'stylelib')
+ # Users may want multiple library paths, so store a list of paths.
+ USER_LIBRARY_PATHS = [os.path.join(mpl.get_configdir(), 'stylelib')]
+ STYLE_EXTENSION = 'mplstyle'
++_SEABORN_STYLE_ALIASES = {
++    "seaborn": "seaborn-v0_8",
++    "seaborn-bright": "seaborn-v0_8-bright",
++    "seaborn-colorblind": "seaborn-v0_8-colorblind",
++    "seaborn-dark": "seaborn-v0_8-dark",
++    "seaborn-darkgrid": "seaborn-v0_8-darkgrid",
++    "seaborn-dark-palette": "seaborn-v0_8-dark-palette",
++    "seaborn-deep": "seaborn-v0_8-deep",
++    "seaborn-muted": "seaborn-v0_8-muted",
++    "seaborn-notebook": "seaborn-v0_8-notebook",
++    "seaborn-paper": "seaborn-v0_8-paper",
++    "seaborn-pastel": "seaborn-v0_8-pastel",
++    "seaborn-poster": "seaborn-v0_8-poster",
++    "seaborn-talk": "seaborn-v0_8-talk",
++    "seaborn-ticks": "seaborn-v0_8-ticks",
++    "seaborn-white": "seaborn-v0_8-white",
++    "seaborn-whitegrid": "seaborn-v0_8-whitegrid",
++}
+ # A list of rcParams that should not be applied from styles
+ STYLE_BLACKLIST = {
+     'interactive', 'backend', 'webagg.port', 'webagg.address',
+@@ -113,31 +131,14 @@ def use(style):
+     def fix_style(s):
+         if isinstance(s, str):
+             s = style_alias.get(s, s)
+-            if s in [
+-                "seaborn",
+-                "seaborn-bright",
+-                "seaborn-colorblind",
+-                "seaborn-dark",
+-                "seaborn-darkgrid",
+-                "seaborn-dark-palette",
+-                "seaborn-deep",
+-                "seaborn-muted",
+-                "seaborn-notebook",
+-                "seaborn-paper",
+-                "seaborn-pastel",
+-                "seaborn-poster",
+-                "seaborn-talk",
+-                "seaborn-ticks",
+-                "seaborn-white",
+-                "seaborn-whitegrid",
+-            ]:
++            if s in _SEABORN_STYLE_ALIASES:
+                 _api.warn_deprecated(
+                     "3.6", message="The seaborn styles shipped by Matplotlib "
+                     "are deprecated since %(since)s, as they no longer "
+                     "correspond to the styles shipped by seaborn. However, "
+                     "they will remain available as 'seaborn-v0_8-<style>'. "
+                     "Alternatively, directly use the seaborn API instead.")
+-                s = s.replace("seaborn", "seaborn-v0_8")
++                s = _SEABORN_STYLE_ALIASES[s]
+         return s
+ 
+     for style in map(fix_style, styles):
+@@ -254,8 +255,13 @@ available = []
+ def reload_library():
+     """Reload the style library."""
+     global library
+-    library = update_user_library(_base_library)
++    library = update_user_library(_base_library.copy())
+     available[:] = sorted(library.keys())
++    library.update({
++        alias: library[name]
++        for alias, name in _SEABORN_STYLE_ALIASES.items()
++        if alias not in library and name in library
++    })
+ 
+ 
+ reload_library()
+diff --git a/lib/matplotlib/tests/test_style.py b/lib/matplotlib/tests/test_style.py
+index e138881..8457d5d 100644
+--- a/lib/matplotlib/tests/test_style.py
++++ b/lib/matplotlib/tests/test_style.py
+@@ -178,6 +178,9 @@ def test_xkcd_cm():
+ 
+ 
+ def test_deprecated_seaborn_styles():
++    assert (style.library["seaborn-colorblind"]
++            == style.library["seaborn-v0_8-colorblind"])
++    assert "seaborn-colorblind" not in style.available
+     with mpl.style.context("seaborn-v0_8-bright"):
+         seaborn_bright = mpl.rcParams.copy()
+     assert mpl.rcParams != seaborn_bright

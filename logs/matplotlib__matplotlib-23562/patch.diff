@@ -1,0 +1,40 @@
+diff --git a/lib/mpl_toolkits/mplot3d/art3d.py b/lib/mpl_toolkits/mplot3d/art3d.py
+index 8fe6e7a..aa4dd62 100644
+--- a/lib/mpl_toolkits/mplot3d/art3d.py
++++ b/lib/mpl_toolkits/mplot3d/art3d.py
+@@ -867,10 +867,10 @@ class Poly3DCollection(PolyCollection):
+         self.stale = True
+ 
+     def get_facecolor(self):
+-        return self._facecolors2d
++        return getattr(self, '_facecolors2d', self._facecolor3d)
+ 
+     def get_edgecolor(self):
+-        return self._edgecolors2d
++        return getattr(self, '_edgecolors2d', self._edgecolor3d)
+ 
+ 
+ def poly_collection_2d_to_3d(col, zs=0, zdir='z'):
+diff --git a/lib/mpl_toolkits/tests/test_mplot3d.py b/lib/mpl_toolkits/tests/test_mplot3d.py
+index ea5a000..d510d12 100644
+--- a/lib/mpl_toolkits/tests/test_mplot3d.py
++++ b/lib/mpl_toolkits/tests/test_mplot3d.py
+@@ -779,6 +779,18 @@ def test_poly3dcollection_verts_validation():
+         art3d.Poly3DCollection(poly)  # should be Poly3DCollection([poly])
+ 
+ 
++def test_poly3dcollection_get_facecolors():
++    poly = np.array([[0, 0, 1], [0, 1, 1], [0, 0, 0]], float)
++    collection = art3d.Poly3DCollection([poly])
++    collection.set_facecolor('C0')
++    collection.set_edgecolor('C1')
++
++    np.testing.assert_array_equal(
++        collection.get_facecolors(), mcolors.to_rgba_array('C0'))
++    np.testing.assert_array_equal(
++        collection.get_edgecolors(), mcolors.to_rgba_array('C1'))
++
++
+ @mpl3d_image_comparison(['poly3dcollection_closed.png'])
+ def test_poly3dcollection_closed():
+     fig = plt.figure()

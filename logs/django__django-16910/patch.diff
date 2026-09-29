@@ -1,0 +1,36 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 781dfd5..3552dca 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -779,7 +779,9 @@ class Query(BaseExpression):
+         # Only include fields mentioned in the mask.
+         for field_name, field_mask in mask.items():
+             field = opts.get_field(field_name)
+-            field_select_mask = select_mask.setdefault(field, {})
++            field_select_mask = select_mask.setdefault(
++                getattr(field, "field", field), {}
++            )
+             if field_mask:
+                 if not field.is_relation:
+                     raise FieldError(next(iter(field_mask)))
+diff --git a/tests/select_related_onetoone/tests.py b/tests/select_related_onetoone/tests.py
+index 8bdfb83..3c12f7f 100644
+--- a/tests/select_related_onetoone/tests.py
++++ b/tests/select_related_onetoone/tests.py
+@@ -50,6 +50,16 @@ class ReverseSelectRelatedTestCase(TestCase):
+             u = User.objects.select_related("userprofile").get(username="test")
+             self.assertEqual(u.userprofile.state, "KS")
+ 
++    def test_only_reverse_one_to_one(self):
++        with self.assertNumQueries(1):
++            user = (
++                User.objects.select_related("userprofile")
++                .only("username", "userprofile__city")
++                .get(username="test")
++            )
++        self.assertEqual(user.get_deferred_fields(), {"email"})
++        self.assertEqual(user.userprofile.get_deferred_fields(), {"user_id", "state"})
++
+     def test_follow_next_level(self):
+         with self.assertNumQueries(1):
+             u = User.objects.select_related("userstat__results").get(username="test")

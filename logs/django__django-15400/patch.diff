@@ -1,0 +1,38 @@
+diff --git a/django/utils/functional.py b/django/utils/functional.py
+index 9e1be0f..730af5d 100644
+--- a/django/utils/functional.py
++++ b/django/utils/functional.py
+@@ -364,6 +364,7 @@ class LazyObject:
+     __gt__ = new_method_proxy(operator.gt)
+     __ne__ = new_method_proxy(operator.ne)
+     __hash__ = new_method_proxy(hash)
++    __radd__ = new_method_proxy(lambda wrapped, other: other + wrapped)
+ 
+     # List/Tuple/Dictionary methods support
+     __getitem__ = new_method_proxy(operator.getitem)
+diff --git a/tests/utils_tests/test_lazyobject.py b/tests/utils_tests/test_lazyobject.py
+index 9ccae59..37d4b9d 100644
+--- a/tests/utils_tests/test_lazyobject.py
++++ b/tests/utils_tests/test_lazyobject.py
+@@ -68,6 +68,21 @@ class LazyObjectTestCase(TestCase):
+         self.assertNotEqual(obj1, obj2)
+         self.assertNotEqual(obj1, "bar")
+ 
++    def test_radd(self):
++        obj = self.lazy_wrap("suffix")
++        self.assertIs(obj._wrapped, empty)
++        self.assertEqual("prefix" + obj, "prefixsuffix")
++        self.assertEqual(obj._wrapped, "suffix")
++
++        with self.assertRaises(TypeError) as expected:
++            "prefix" + 1
++        obj = self.lazy_wrap(1)
++        with self.assertRaises(TypeError) as actual:
++            "prefix" + obj
++        self.assertEqual(type(actual.exception), type(expected.exception))
++        self.assertEqual(actual.exception.args, expected.exception.args)
++        self.assertEqual(obj._wrapped, 1)
++
+     def test_lt(self):
+         obj1 = self.lazy_wrap(1)
+         obj2 = self.lazy_wrap(2)

@@ -1,0 +1,31 @@
+diff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py
+index 0545797..ac5a2a6 100644
+--- a/sympy/printing/pretty/pretty.py
++++ b/sympy/printing/pretty/pretty.py
+@@ -825,7 +825,7 @@ def _print_MatAdd(self, expr):
+             if s is None:
+                 s = pform     # First element
+             else:
+-                if S(item.args[0]).is_negative:
++                if item.is_MatMul and item.args[0].is_negative:
+                     s = prettyForm(*stringPict.next(s, ' '))
+                     pform = self._print(item)
+                 else:
+diff --git a/sympy/printing/pretty/tests/test_pretty.py b/sympy/printing/pretty/tests/test_pretty.py
+index 9e8bfc5..bede3bd 100644
+--- a/sympy/printing/pretty/tests/test_pretty.py
++++ b/sympy/printing/pretty/tests/test_pretty.py
+@@ -6116,10 +6116,13 @@ def test_MatrixSymbol_printing():
+     A = MatrixSymbol("A", 3, 3)
+     B = MatrixSymbol("B", 3, 3)
+     C = MatrixSymbol("C", 3, 3)
++    X = MatrixSymbol("x", 3, 3)
++    Y = MatrixSymbol("y*", 3, 3)
+ 
+     assert pretty(-A*B*C) == "-A*B*C"
+     assert pretty(A - B) == "-B + A"
+     assert pretty(A*B*C - A*B - B*C) == "-A*B -B*C + A*B*C"
++    assert pretty(X + Y) == "x + y*"
+ 
+ 
+ def test_degree_printing():

@@ -1,0 +1,40 @@
+diff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py
+index df7452e..6f755c6 100644
+--- a/sympy/printing/pretty/pretty.py
++++ b/sympy/printing/pretty/pretty.py
+@@ -1921,7 +1921,9 @@ def _print_nth_root(self, base, expt):
+             if exp == '2':
+                 exp = ''
+         else:
+-            exp = str(expt.args[0])
++            # The reciprocal exponent may be canonicalized, e.g. 1/E as
++            # exp(-1), so derive the root index from the reciprocal itself.
++            exp = self._print(1/expt).s
+         exp = exp.ljust(2)
+         if len(exp) > 2:
+             rootsign = ' '*(len(exp) - 2) + rootsign
+diff --git a/sympy/printing/pretty/tests/test_pretty.py b/sympy/printing/pretty/tests/test_pretty.py
+index d33795d..5d843d9 100644
+--- a/sympy/printing/pretty/tests/test_pretty.py
++++ b/sympy/printing/pretty/tests/test_pretty.py
+@@ -1,6 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from sympy import (
+-    Add, And, Basic, Derivative, Dict, Eq, Equivalent, FF,
++    Add, And, Basic, Derivative, Dict, E, Eq, Equivalent, FF,
+     FiniteSet, Function, Ge, Gt, I, Implies, Integral, SingularityFunction,
+     Lambda, Le, Limit, Lt, Matrix, Mul, Nand, Ne, Nor, Not, O, Or,
+     Pow, Product, QQ, RR, Rational, Ray, rootof, RootSum, S,
+@@ -2183,6 +2183,12 @@ def test_pretty_sqrt():
+     assert upretty(expr) == ucode_str
+ 
+ 
++def test_pretty_reciprocal_exp_root():
++    expr = pi**(1/E)
++    assert pretty(expr) == pretty(pi**(1/x)).replace('x', pretty(E))
++    assert upretty(expr) == upretty(pi**(1/x)).replace('x', upretty(E))
++
++
+ def test_pretty_sqrt_char_knob():
+     # See PR #9234.
+     expr = sqrt(2)

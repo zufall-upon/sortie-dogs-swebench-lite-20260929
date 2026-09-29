@@ -1,0 +1,47 @@
+diff --git a/astropy/io/ascii/qdp.py b/astropy/io/ascii/qdp.py
+index 83a4f00..e01148a 100644
+--- a/astropy/io/ascii/qdp.py
++++ b/astropy/io/ascii/qdp.py
+@@ -60,7 +60,7 @@ def _line_type(line, delimiter=None):
+     ValueError: Unrecognized QDP line...
+     """
+     _decimal_re = r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?"
+-    _command_re = r"READ [TS]ERR(\s+[0-9]+)+"
++    _command_re = r"(?i:READ [TS]ERR(\s+[0-9]+)+)"
+ 
+     sep = delimiter
+     if delimiter is None:
+diff --git a/astropy/io/ascii/tests/test_qdp.py b/astropy/io/ascii/tests/test_qdp.py
+index ef24e6f..50c6dc2 100644
+--- a/astropy/io/ascii/tests/test_qdp.py
++++ b/astropy/io/ascii/tests/test_qdp.py
+@@ -139,6 +139,29 @@ def test_read_example():
+         assert np.allclose(col1, col2, equal_nan=True)
+ 
+ 
++@pytest.mark.parametrize(
++    ("qdp", "colnames", "values"),
++    [
++        (
++            "read serr 1 2 \n1 0.5 1 0.5\n",
++            ["col1", "col1_err", "col2", "col2_err"],
++            (1, 0.5, 1, 0.5),
++        ),
++        (
++            "rEaD tErR 1\n1 0.5 -0.5\n",
++            ["col1", "col1_perr", "col1_nerr"],
++            (1, 0.5, -0.5),
++        ),
++    ],
++)
++def test_read_case_insensitive_error_commands(qdp, colnames, values):
++    with pytest.warns(AstropyUserWarning, match="table_id not specified"):
++        table = Table.read(qdp, format="ascii.qdp")
++
++    assert table.colnames == colnames
++    assert tuple(table[0]) == values
++
++
+ def test_roundtrip_example(tmp_path):
+     example_qdp = """
+         ! Initial comment line 1

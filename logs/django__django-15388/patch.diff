@@ -1,0 +1,54 @@
+diff --git a/django/template/autoreload.py b/django/template/autoreload.py
+index cf1b20b..7242d68 100644
+--- a/django/template/autoreload.py
++++ b/django/template/autoreload.py
+@@ -48,6 +48,8 @@ def watch_for_template_changes(sender, **kwargs):
+ 
+ @receiver(file_changed, dispatch_uid='template_loaders_file_changed')
+ def template_changed(sender, file_path, **kwargs):
++    if file_path.suffix == '.py':
++        return
+     for template_dir in get_template_directories():
+         if template_dir in file_path.parents:
+             reset_loaders()
+diff --git a/tests/template_tests/test_autoreloader.py b/tests/template_tests/test_autoreloader.py
+index d6ece4c..e2d6eb1 100644
+--- a/tests/template_tests/test_autoreloader.py
++++ b/tests/template_tests/test_autoreloader.py
+@@ -4,6 +4,7 @@ from unittest import mock
+ from django.template import autoreload
+ from django.test import SimpleTestCase, override_settings
+ from django.test.utils import require_jinja2
++from django.utils.autoreload import BaseReloader
+ 
+ ROOT = Path(__file__).parent.absolute()
+ EXTRA_TEMPLATES_DIR = ROOT / "templates_extra"
+@@ -39,6 +40,28 @@ class TemplateReloadTests(SimpleTestCase):
+         self.assertIsNone(autoreload.template_changed(None, Path(__file__)))
+         mock_reset.assert_not_called()
+ 
++    @override_settings(TEMPLATES=[{
++        'BACKEND': 'django.template.backends.django.DjangoTemplates',
++        'DIRS': [Path.cwd()],
++    }])
++    @mock.patch('django.utils.autoreload.trigger_reload')
++    def test_python_file_changed_in_template_directory(self, mock_trigger_reload):
++        python_path = Path(__file__).resolve()
++        BaseReloader().notify_file_changed(python_path)
++        mock_trigger_reload.assert_called_once_with(python_path)
++
++    @override_settings(TEMPLATES=[{
++        'BACKEND': 'django.template.backends.django.DjangoTemplates',
++        'DIRS': [Path.cwd()],
++    }])
++    def test_template_file_changed_in_project_directory(self):
++        template_path = ROOT / 'templates' / 'index.html'
++        with mock.patch('django.template.autoreload.reset_loaders') as mock_reset:
++            with mock.patch('django.utils.autoreload.trigger_reload') as mock_trigger_reload:
++                BaseReloader().notify_file_changed(template_path)
++        mock_reset.assert_called_once()
++        mock_trigger_reload.assert_not_called()
++
+     def test_watch_for_template_changes(self):
+         mock_reloader = mock.MagicMock()
+         autoreload.watch_for_template_changes(mock_reloader)

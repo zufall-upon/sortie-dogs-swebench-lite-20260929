@@ -1,0 +1,51 @@
+diff --git a/django/contrib/admin/templatetags/admin_modify.py b/django/contrib/admin/templatetags/admin_modify.py
+index 9df4b7a..5b742af 100644
+--- a/django/contrib/admin/templatetags/admin_modify.py
++++ b/django/contrib/admin/templatetags/admin_modify.py
+@@ -100,6 +100,7 @@ def submit_row(context):
+                 and context.get("show_delete", True)
+             ),
+             "show_save_as_new": not is_popup
++            and has_add_permission
+             and has_change_permission
+             and change
+             and save_as,
+diff --git a/tests/admin_views/test_templatetags.py b/tests/admin_views/test_templatetags.py
+index a131330..0887c37 100644
+--- a/tests/admin_views/test_templatetags.py
++++ b/tests/admin_views/test_templatetags.py
+@@ -5,6 +5,7 @@ from django.contrib.admin.templatetags.admin_list import date_hierarchy
+ from django.contrib.admin.templatetags.admin_modify import submit_row
+ from django.contrib.auth.admin import UserAdmin
+ from django.contrib.auth.models import User
++from django.template.loader import render_to_string
+ from django.test import RequestFactory, TestCase
+ from django.urls import reverse
+ 
+@@ -33,6 +34,26 @@ class AdminTemplateTagsTest(AdminViewBasicTestCase):
+         self.assertIs(template_context["extra"], True)
+         self.assertIs(template_context["show_save"], True)
+ 
++    def test_submit_row_save_as_new_requires_add_permission(self):
++        context = {
++            "add": False,
++            "change": True,
++            "is_popup": False,
++            "save_as": True,
++            "has_add_permission": False,
++            "has_change_permission": True,
++            "has_view_permission": True,
++            "has_editable_inline_admin_formsets": False,
++            "has_delete_permission": False,
++        }
++        for has_add_permission, expected in ((False, False), (True, True)):
++            with self.subTest(has_add_permission=has_add_permission):
++                context["has_add_permission"] = has_add_permission
++                submit_line = render_to_string(
++                    "admin/submit_line.html", submit_row(context).flatten()
++                )
++                self.assertEqual('name="_saveasnew"' in submit_line, expected)
++
+     def test_override_show_save_and_add_another(self):
+         request = self.request_factory.get(
+             reverse("admin:auth_user_change", args=[self.superuser.pk]),

@@ -1,0 +1,91 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index 1a55d3d..54ed728 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -764,10 +764,22 @@ class Field(RegisterLookupMixin):
+             if not getattr(cls, self.attname, None):
+                 setattr(cls, self.attname, self.descriptor_class(self))
+         if self.choices is not None:
+-            if not hasattr(cls, 'get_%s_display' % self.name):
++            display_method = 'get_%s_display' % self.name
++            inherited_method = next(
++                (
++                    base.__dict__[display_method]
++                    for base in cls.__mro__[1:]
++                    if display_method in base.__dict__
++                ),
++                None,
++            )
++            if not hasattr(cls, display_method) or (
++                display_method not in cls.__dict__ and
++                isinstance(inherited_method, partialmethod)
++            ):
+                 setattr(
+                     cls,
+-                    'get_%s_display' % self.name,
++                    display_method,
+                     partialmethod(cls._get_FIELD_display, field=self),
+                 )
+ 
+diff --git a/tests/model_fields/tests.py b/tests/model_fields/tests.py
+index a3b8054..e1ef932 100644
+--- a/tests/model_fields/tests.py
++++ b/tests/model_fields/tests.py
+@@ -168,6 +168,31 @@ class GetFieldDisplayTests(SimpleTestCase):
+         self.assertIsInstance(val, str)
+         self.assertEqual(val, 'translated')
+ 
++    def test_inherited_choices(self):
++        class A(models.Model):
++            foo_choice = [('A', 'output1'), ('B', 'output2')]
++            field_foo = models.CharField(max_length=254, choices=foo_choice)
++
++            class Meta:
++                abstract = True
++
++        class B(A):
++            foo_choice = [('A', 'output1'), ('B', 'output2'), ('C', 'output3')]
++            field_foo = models.CharField(max_length=254, choices=foo_choice)
++
++            class Meta:
++                app_label = 'model_fields'
++
++        class Inherited(A):
++            class Meta:
++                app_label = 'model_fields'
++
++        self.assertEqual(B(field_foo='A').get_field_foo_display(), 'output1')
++        self.assertEqual(B(field_foo='B').get_field_foo_display(), 'output2')
++        self.assertEqual(B(field_foo='C').get_field_foo_display(), 'output3')
++        self.assertEqual(Inherited(field_foo='A').get_field_foo_display(), 'output1')
++        self.assertEqual(Inherited(field_foo='B').get_field_foo_display(), 'output2')
++
+     def test_overriding_FIELD_display(self):
+         class FooBar(models.Model):
+             foo_bar = models.IntegerField(choices=[(1, 'foo'), (2, 'bar')])
+@@ -175,8 +200,25 @@ class GetFieldDisplayTests(SimpleTestCase):
+             def get_foo_bar_display(self):
+                 return 'something'
+ 
++        class AbstractFooBar(models.Model):
++            foo_bar = models.IntegerField(choices=[(1, 'foo'), (2, 'bar')])
++
++            def get_foo_bar_display(self):
++                return 'something'
++
++            class Meta:
++                abstract = True
++
++        class OverriddenFooBar(AbstractFooBar):
++            foo_bar = models.IntegerField(choices=[(1, 'foo'), (2, 'bar'), (3, 'baz')])
++
++            class Meta:
++                app_label = 'model_fields'
++
+         f = FooBar(foo_bar=1)
+         self.assertEqual(f.get_foo_bar_display(), 'something')
++        f = OverriddenFooBar(foo_bar=3)
++        self.assertEqual(f.get_foo_bar_display(), 'something')
+ 
+     def test_iterator_choices(self):
+         """

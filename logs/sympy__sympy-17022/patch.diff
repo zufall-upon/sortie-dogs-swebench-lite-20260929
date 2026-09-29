@@ -1,0 +1,94 @@
+diff --git a/sympy/printing/pycode.py b/sympy/printing/pycode.py
+index 6ec7bd8..6590090 100644
+--- a/sympy/printing/pycode.py
++++ b/sympy/printing/pycode.py
+@@ -503,6 +503,43 @@ def _print_MatMul(self, expr):
+             return '({0})'.format(').dot('.join(self._print(i) for i in expr_list))
+         return '({0})'.format(').dot('.join(self._print(i) for i in expr.args))
+ 
++    def _print_MatAdd(self, expr):
++        from sympy.matrices.expressions.matexpr import Identity, MatrixSymbol
++
++        has_old_identity_size = hasattr(self, '_identity_size')
++        old_identity_size = getattr(self, '_identity_size', None)
++        identity_size = None
++        if any(not identity.rows.is_number
++                for identity in expr.atoms(Identity)):
++            for term in expr.args:
++                if not term.has(Identity) and term.atoms(MatrixSymbol):
++                    identity_size = '(%s).shape[0]' % self._print(term)
++                    break
++
++        if identity_size is None:
++            self.__dict__.pop('_identity_size', None)
++        else:
++            self._identity_size = identity_size
++        try:
++            return self._print_Add(expr)
++        finally:
++            if has_old_identity_size:
++                self._identity_size = old_identity_size
++            else:
++                self.__dict__.pop('_identity_size', None)
++
++    def _print_Identity(self, expr):
++        size = getattr(self, '_identity_size', None)
++        if size is None or expr.rows.is_number:
++            size = self._print(expr.rows)
++        return '%s(%s)' % (self._module_format('numpy.eye'), size)
++
++    def _print_ZeroMatrix(self, expr):
++        raise NotImplementedError("NumPyPrinter does not support ZeroMatrix")
++
++    def _print_OneMatrix(self, expr):
++        raise NotImplementedError("NumPyPrinter does not support OneMatrix")
++
+     def _print_MatPow(self, expr):
+         "Matrix power printer"
+         return '{0}({1}, {2})'.format(self._module_format('numpy.linalg.matrix_power'),
+diff --git a/sympy/utilities/tests/test_lambdify.py b/sympy/utilities/tests/test_lambdify.py
+index e56fd64..9cd02b4 100644
+--- a/sympy/utilities/tests/test_lambdify.py
++++ b/sympy/utilities/tests/test_lambdify.py
+@@ -11,7 +11,7 @@
+     true, false, And, Or, Not, ITE, Min, Max, floor, diff, IndexedBase, Sum,
+     DotProduct, Eq, Dummy, sinc, erf, erfc, factorial, gamma, loggamma,
+     digamma, RisingFactorial, besselj, bessely, besseli, besselk, S,
+-    MatrixSymbol, chebyshevt, chebyshevu, legendre, hermite, laguerre,
++    MatrixSymbol, Identity, chebyshevt, chebyshevu, legendre, hermite, laguerre,
+     gegenbauer, assoc_legendre, assoc_laguerre, jacobi)
+ from sympy.printing.lambdarepr import LambdaPrinter
+ from sympy.printing.pycode import NumPyPrinter
+@@ -1117,6 +1117,32 @@ def test_MatrixSymbol_issue_15578():
+     assert numpy.allclose(g(A0), numpy.array([[37, 54], [81, 118]]))
+ 
+ 
++def test_MatrixSymbol_issue_17022_identity():
++    if not numpy:
++        skip("numpy not installed")
++    from sympy import OneMatrix, ZeroMatrix
++
++    n = symbols('n', integer=True)
++    A = MatrixSymbol('A', n, n)
++    A0 = numpy.array([[1, 2], [3, 4]])
++
++    f = lambdify(A, A + Identity(n))
++    numpy.testing.assert_array_equal(f(A0), numpy.array([[2, 2], [3, 5]]))
++
++    # An explicit dimension is also supported, while an unresolved dimension
++    # must not be confused with the scalar imaginary unit.
++    g = lambdify(n, Identity(n))
++    numpy.testing.assert_array_equal(g(2), numpy.eye(2))
++    h = lambdify((), Identity(n))
++    raises(TypeError, lambda: h())
++    raises(TypeError, lambda: h())
++    numpy.testing.assert_array_equal(f(A0), numpy.array([[2, 2], [3, 5]]))
++
++    for matrix in (ZeroMatrix(n, n), OneMatrix(n, n)):
++        raises(NotImplementedError,
++               lambda matrix=matrix: lambdify((), matrix))
++
++
+ def test_issue_15654():
+     if not scipy:
+         skip("scipy not installed")

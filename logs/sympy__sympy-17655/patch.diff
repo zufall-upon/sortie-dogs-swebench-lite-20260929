@@ -1,0 +1,102 @@
+diff --git a/sympy/geometry/point.py b/sympy/geometry/point.py
+index 7c978c4..5ddc7fb 100644
+--- a/sympy/geometry/point.py
++++ b/sympy/geometry/point.py
+@@ -21,7 +21,7 @@
+ 
+ import warnings
+ 
+-from sympy.core import S, sympify, Expr
++from sympy.core import S, sympify, Expr, Mul, Pow, SympifyError
+ from sympy.core.compatibility import is_sequence
+ from sympy.core.containers import Tuple
+ from sympy.simplify import nsimplify, simplify
+@@ -104,6 +104,7 @@ class Point(GeometryEntity):
+     """
+ 
+     is_Point = True
++    _op_priority = 10.001
+ 
+     def __new__(cls, *args, **kwargs):
+         evaluate = kwargs.get('evaluate', global_evaluate[0])
+@@ -221,6 +222,11 @@ def __add__(self, other):
+         coords = [simplify(a + b) for a, b in zip(s, o)]
+         return Point(coords, evaluate=False)
+ 
++    def __radd__(self, other):
++        if isinstance(other, Expr):
++            return Add(other, self)
++        return other.__add__(self)
++
+     def __contains__(self, item):
+         return item in self.args
+ 
+@@ -230,6 +236,11 @@ def __div__(self, divisor):
+         coords = [simplify(x/divisor) for x in self.args]
+         return Point(coords, evaluate=False)
+ 
++    def __rdiv__(self, other):
++        if isinstance(other, Expr):
++            return Mul(other, Pow(self, S.NegativeOne))
++        return other.__div__(self)
++
+     def __eq__(self, other):
+         if not isinstance(other, Point) or len(self.args) != len(other.args):
+             return False
+@@ -278,6 +289,21 @@ def __mul__(self, factor):
+         coords = [simplify(x*factor) for x in self.args]
+         return Point(coords, evaluate=False)
+ 
++    def __rmul__(self, factor):
++        try:
++            factor = sympify(factor)
++        except SympifyError:
++            return GeometryEntity.__rmul__(self, factor)
++        if not isinstance(factor, Expr):
++            return GeometryEntity.__rmul__(self, factor)
++        if (getattr(factor, 'is_Matrix', False) or
++                getattr(factor, 'is_MatrixExpr', False) or
++                getattr(factor, 'is_scalar', True) is False):
++            return GeometryEntity.__rmul__(self, factor)
++        if factor.is_commutative is not True:
++            return Mul(factor, self)
++        return self.__mul__(factor)
++
+     def __neg__(self):
+         """Negate the point."""
+         coords = [-x for x in self.args]
+@@ -288,6 +314,11 @@ def __sub__(self, other):
+         coordinates."""
+         return self + [-x for x in other]
+ 
++    def __rsub__(self, other):
++        if isinstance(other, Expr):
++            return Add(other, -self)
++        return other.__sub__(self)
++
+     @classmethod
+     def _normalize_dimension(cls, *points, **kwargs):
+         """Ensure that points have the same dimension.
+diff --git a/sympy/geometry/tests/test_point.py b/sympy/geometry/tests/test_point.py
+index 475d1d4..63df575 100644
+--- a/sympy/geometry/tests/test_point.py
++++ b/sympy/geometry/tests/test_point.py
+@@ -27,6 +27,10 @@ def test_point():
+     assert (p3 + p4) == p4
+     assert (p2 - p1) == Point(y1 - x1, y2 - x2)
+     assert p4*5 == Point(5, 5)
++    assert p3 + S(2.0)*p4 == p3 + p4*S(2.0) == \
++        Point(2.0, 2.0, evaluate=False)
++    assert p3 + 2.0*p4 == p3 + p4*2.0 == Point(2.0, 2.0, evaluate=False)
++    raises(TypeError, lambda: Matrix([[1, 0], [0, 1]])*p4)
+     assert -p2 == Point(-y1, -y2)
+     raises(ValueError, lambda: Point(3, I))
+     raises(ValueError, lambda: Point(2*I, I))
+@@ -141,6 +145,7 @@ def test_point3D():
+     assert (p3 + p4) == p4
+     assert (p2 - p1) == Point3D(y1 - x1, y2 - x2, y3 - x3)
+     assert p4*5 == Point3D(5, 5, 5)
++    assert S(2)*p4 == p4*S(2) == Point3D(2, 2, 2)
+     assert -p2 == Point3D(-y1, -y2, -y3)
+ 
+     assert Point(34.05, sqrt(3)) == Point(Rational(681, 20), sqrt(3))

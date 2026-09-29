@@ -1,0 +1,68 @@
+diff --git a/requests/models.py b/requests/models.py
+index d845637..404b4bf 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -463,7 +463,10 @@ class Request(object):
+     def register_hook(self, event, hook):
+         """Properly register a hook."""
+ 
+-        self.hooks[event].append(hook)
++        if isinstance(hook, list):
++            self.hooks[event].extend(hook)
++        else:
++            self.hooks[event].append(hook)
+ 
+     def deregister_hook(self, event, hook):
+         """Deregister a previously registered hook.
+diff --git a/tests/test_requests.py b/tests/test_requests.py
+index f8a31f2..dbff18c 100755
+--- a/tests/test_requests.py
++++ b/tests/test_requests.py
+@@ -6,7 +6,7 @@
+ # Path hack.
+ import sys
+ import os
+-sys.path.insert(0, os.path.abspath('..'))
++sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+ import json
+ import unittest
+ import pickle
+@@ -14,6 +14,7 @@ import tempfile
+ 
+ import requests
+ from requests.compat import str, StringIO
++from requests.hooks import dispatch_hook
+ # import envoy
+ from requests import HTTPError
+ from requests import get, post, head, put
+@@ -744,6 +745,30 @@ class RequestsTestSuite(TestSetup, TestBaseMixin, unittest.TestCase):
+             assert 'foo' in response.text
+             assert 'bar' in response.text
+ 
++    def test_multiple_hooks_request_and_session(self):
++
++        def first(response):
++            response.append('first')
++            return response
++
++        def second(response):
++            response.append('second')
++            return response
++
++        hooks = [first, second]
++        requests_to_test = [
++            requests.Request(hooks={'response': hooks}),
++            requests.session(hooks={'response': hooks}).request(
++                'GET', 'http://example.invalid/', return_response=False),
++        ]
++
++        for request in requests_to_test:
++            self.assertEqual(request.hooks['response'], hooks)
++            response = []
++            self.assertEqual(
++                dispatch_hook('response', request.hooks, response), response)
++            self.assertEqual(response, ['first', 'second'])
++
+     def test_session_persistent_cookies(self):
+ 
+         s = requests.session()

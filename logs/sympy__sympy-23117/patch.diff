@@ -1,0 +1,53 @@
+diff --git a/sympy/tensor/array/ndim_array.py b/sympy/tensor/array/ndim_array.py
+index 6490a65..2c19d2d 100644
+--- a/sympy/tensor/array/ndim_array.py
++++ b/sympy/tensor/array/ndim_array.py
+@@ -194,10 +194,14 @@ def f(pointer):
+             if not isinstance(pointer, Iterable):
+                 return [pointer], ()
+ 
+-            result = []
+-            elems, shapes = zip(*[f(i) for i in pointer])
++            elements = [f(i) for i in pointer]
++            if not elements:
++                return [], (0,)
++
++            elems, shapes = zip(*elements)
+             if len(set(shapes)) != 1:
+                 raise ValueError("could not determine shape unambiguously")
++            result = []
+             for i in elems:
+                 result.extend(i)
+             return result, (len(shapes),)+shapes[0]
+diff --git a/sympy/tensor/array/tests/test_ndim_array.py b/sympy/tensor/array/tests/test_ndim_array.py
+index f0732fd..3feedb9 100644
+--- a/sympy/tensor/array/tests/test_ndim_array.py
++++ b/sympy/tensor/array/tests/test_ndim_array.py
+@@ -38,6 +38,27 @@ def test_array_negative_indices():
+         assert test_array[-1, -1] == 10
+ 
+ 
++def test_empty_array_shape():
++    array = Array([])
++    assert array.shape == (0,)
++    assert array.rank() == 1
++    assert len(array) == 0
++
++    for ArrayType in array_types:
++        array = ArrayType([])
++        assert array.shape == (0,)
++        assert array.rank() == 1
++        assert len(array) == 0
++
++        nested_array = ArrayType([[]])
++        assert nested_array.shape == (1, 0)
++        assert nested_array.rank() == 2
++        assert len(nested_array) == 0
++        assert nested_array.tolist() == [[]]
++
++    raises(ValueError, lambda: Array([[], [1]]))
++
++
+ def test_issue_18361():
+     A = Array([sin(2 * x) - 2 * sin(x) * cos(x)])
+     B = Array([sin(x)**2 + cos(x)**2, 0])

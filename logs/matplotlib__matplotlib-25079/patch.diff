@@ -1,0 +1,49 @@
+diff --git a/lib/matplotlib/colorbar.py b/lib/matplotlib/colorbar.py
+index 966eb07..f5fb076 100644
+--- a/lib/matplotlib/colorbar.py
++++ b/lib/matplotlib/colorbar.py
+@@ -1102,8 +1102,16 @@ class Colorbar:
+ 
+         # transform from 0-1 to vmin-vmax:
+         if not self.norm.scaled():
+-            self.norm.vmin = 0
+-            self.norm.vmax = 1
++            if self.mappable.get_array() is not None:
++                # The norm may be temporarily unscaled while autoscaling.
++                # Use the mappable's data for the missing limits instead of
++                # defaults that may be invalid for the norm (e.g. 0 for a
++                # LogNorm).
++                with self.norm.callbacks.blocked():
++                    self.mappable.autoscale_None()
++            else:
++                self.norm.vmin = 0
++                self.norm.vmax = 1
+         self.norm.vmin, self.norm.vmax = mtransforms.nonsingular(
+             self.norm.vmin, self.norm.vmax, expander=0.1)
+         if (not isinstance(self.norm, colors.BoundaryNorm) and
+diff --git a/lib/matplotlib/tests/test_colorbar.py b/lib/matplotlib/tests/test_colorbar.py
+index e39d007..9d19a20 100644
+--- a/lib/matplotlib/tests/test_colorbar.py
++++ b/lib/matplotlib/tests/test_colorbar.py
+@@ -658,6 +658,21 @@ def test_colorbar_scale_reset():
+     assert cbar.outline.get_edgecolor() == mcolors.to_rgba('red')
+ 
+ 
++def test_colorbar_scale_reset_after_autoscale():
++    rng = np.random.default_rng(0)
++    data = rng.uniform(1, 5, (25, 25))
++    fig, ax = plt.subplots(layout='constrained')
++    pcm = ax.pcolormesh(data)
++    cbar = fig.colorbar(pcm, ax=ax)
++
++    pcm.norm = LogNorm(1, 5)
++    pcm.autoscale()
++
++    assert cbar.norm is pcm.norm
++    assert cbar.ax.yaxis.get_scale() == 'log'
++    assert (cbar.vmin, cbar.vmax) == (data.min(), data.max())
++
++
+ def test_colorbar_get_ticks_2():
+     plt.rcParams['_internal.classic_mode'] = False
+     fig, ax = plt.subplots()

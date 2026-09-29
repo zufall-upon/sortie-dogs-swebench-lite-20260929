@@ -1,0 +1,28 @@
+diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py
+index 2c50002..06ae2f4 100644
+--- a/sympy/core/numbers.py
++++ b/sympy/core/numbers.py
+@@ -2625,7 +2625,7 @@ def __neg__():
+     def _eval_power(self, expt):
+         if expt.is_positive:
+             return self
+-        if expt.is_negative:
++        if expt.is_extended_negative:
+             return S.ComplexInfinity
+         if expt.is_extended_real is False:
+             return S.NaN
+diff --git a/sympy/core/tests/test_power.py b/sympy/core/tests/test_power.py
+index 413fbd4..0e7acc1 100644
+--- a/sympy/core/tests/test_power.py
++++ b/sympy/core/tests/test_power.py
+@@ -255,6 +255,10 @@ def test_power_rewrite_exp():
+ 
+ 
+ def test_zero():
++    assert S.Zero**-1 == zoo
++    assert 0**oo == 0
++    assert 0**-oo == zoo
++
+     x = Symbol('x')
+     y = Symbol('y')
+     assert 0**x != 0

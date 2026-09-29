@@ -1,0 +1,65 @@
+diff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py
+index 6646118..d550c74 100644
+--- a/sympy/printing/pretty/pretty.py
++++ b/sympy/printing/pretty/pretty.py
+@@ -1145,12 +1145,15 @@ def _print_BasisDependent(self, expr):
+                 tempstr = partstr
+                 tempstr = tempstr.replace(vectstrs[i], '')
+                 if '\N{right parenthesis extension}' in tempstr:   # If scalar is a fraction
+-                    for paren in range(len(tempstr)):
+-                        flag[i] = 1
+-                        if tempstr[paren] == '\N{right parenthesis extension}':
+-                            tempstr = tempstr[:paren] + '\N{right parenthesis extension}'\
+-                                         + ' '  + vectstrs[i] + tempstr[paren + 1:]
+-                            break
++                    extension = '\N{right parenthesis extension}'
++                    paren = tempstr.index(extension)
++                    line_end = tempstr.find('\n', paren)
++                    if line_end == -1:
++                        line_end = len(tempstr)
++                    paren = tempstr.rfind(extension, 0, line_end)
++                    flag[i] = 1
++                    tempstr = (tempstr[:paren] + extension + ' ' + vectstrs[i] +
++                               tempstr[paren + 1:])
+                 elif '\N{RIGHT PARENTHESIS LOWER HOOK}' in tempstr:
+                     flag[i] = 1
+                     tempstr = tempstr.replace('\N{RIGHT PARENTHESIS LOWER HOOK}',
+diff --git a/sympy/printing/pretty/tests/test_pretty.py b/sympy/printing/pretty/tests/test_pretty.py
+index 239c2f4..08cd062 100644
+--- a/sympy/printing/pretty/tests/test_pretty.py
++++ b/sympy/printing/pretty/tests/test_pretty.py
+@@ -77,7 +77,8 @@
+ 
+ from sympy.testing.pytest import raises, _both_exp_pow, warns_deprecated_sympy
+ 
+-from sympy.vector import CoordSys3D, Gradient, Curl, Divergence, Dot, Cross, Laplacian
++from sympy.vector import (CoordSys3D, Del, Gradient, Curl, Divergence, Dot,
++                          Cross, Laplacian)
+ 
+ 
+ 
+@@ -7027,6 +7028,24 @@ def test_issue_12675():
+     assert upretty((1/y)*e.j) == ucode_str
+ 
+ 
++def test_issue_23191():
++    delop = Del()
++    C = CoordSys3D('C')
++    t = symbols('t')
++    ten = symbols('10', positive=True)
++    eps, mu = 4*pi*ten**(-11), ten**(-5)
++    Bx = 2*ten**(-4)*cos(ten**5*t)*sin(ten**(-3)*C.y)
++    vecB = Bx*C.i
++    vecE = (1/eps)*Integral(delop.cross(vecB/mu).doit(), t)
++
++    assert upretty(vecB).splitlines()[1].rstrip() == \
++        '⎜2⋅sin⎜───⎟⋅cos⎝10 ⋅t⎠⎟ i_C'
++    assert upretty(vecE).splitlines()[1].rstrip() == \
++        '⎜     ⎮       ⎛y_C⎞    ⎛  5  ⎞    ⎟ k_C'
++    assert upretty(vecE.doit()).splitlines()[1].rstrip() == \
++        '⎜-10 ⋅sin⎝10 ⋅t⎠⋅cos⎜───⎟ ⎟ k_C'
++
++
+ def test_MatrixSymbol_printing():
+     # test cases for issue #14237
+     A = MatrixSymbol("A", 3, 3)

@@ -1,0 +1,51 @@
+diff --git a/sympy/core/basic.py b/sympy/core/basic.py
+index 6866648..ca63352 100644
+--- a/sympy/core/basic.py
++++ b/sympy/core/basic.py
+@@ -500,15 +500,19 @@ def atoms(self, *types):
+         {I*pi, 2*sin(y + I*pi)}
+ 
+         """
++        no_types = not types
+         if types:
+             types = tuple(
+                 [t if isinstance(t, type) else type(t) for t in types])
+-        else:
+-            types = (Atom,)
+         result = set()
+-        for expr in preorder_traversal(self):
+-            if isinstance(expr, types):
+-                result.add(expr)
++        if no_types:
++            for expr in preorder_traversal(self):
++                if isinstance(expr, Basic) and not expr.args:
++                    result.add(expr)
++        else:
++            for expr in preorder_traversal(self):
++                if isinstance(expr, types):
++                    result.add(expr)
+         return result
+ 
+     @property
+diff --git a/sympy/core/tests/test_basic.py b/sympy/core/tests/test_basic.py
+index 50f8f9e..715f4be 100644
+--- a/sympy/core/tests/test_basic.py
++++ b/sympy/core/tests/test_basic.py
+@@ -137,7 +137,16 @@ def test_subs_with_unicode_symbols():
+ 
+ 
+ def test_atoms():
+-    assert b21.atoms() == set()
++    assert b1.atoms() == {b1}
++    assert b21.atoms() == {b1}
++    assert Basic(2).atoms() == set()
++
++    child = Basic()
++    a = Atom(child)
++    assert a.args == (child,)
++    assert a.atoms() == {child}
++    assert a.atoms(Atom) == {a}
++    assert Atom(2).atoms() == set()
+ 
+ 
+ def test_free_symbols_empty():

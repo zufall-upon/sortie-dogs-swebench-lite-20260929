@@ -1,0 +1,213 @@
+diff --git a/src/_pytest/assertion/rewrite.py b/src/_pytest/assertion/rewrite.py
+index 2903b89..83a8fb4 100644
+--- a/src/_pytest/assertion/rewrite.py
++++ b/src/_pytest/assertion/rewrite.py
+@@ -534,6 +534,44 @@ def _format_boolop(explanations, is_or):
+         return explanation.replace(b"%", b"%%")
+ 
+ 
++def _call_all_any(func, iterable):
++    """Call *func*, collecting the values tested by the built-in all/any."""
++    builtins = six.moves.builtins
++    if func is builtins.all:
++        capture_values = type(iterable) not in (list, tuple)
++        values = [] if capture_values else iterable
++        for value in iterable:
++            if capture_values:
++                _append_all_any_value(values, value)
++            if not value:
++                return False, values
++        return True, values
++    elif func is builtins.any:
++        capture_values = type(iterable) not in (list, tuple)
++        values = [] if capture_values else iterable
++        for value in iterable:
++            if capture_values:
++                _append_all_any_value(values, value)
++            if value:
++                return True, values
++        return False, values
++    return func(iterable), None
++
++
++_ALL_ANY_MORE = object()
++
++
++def _append_all_any_value(values, value):
++    """Keep a bounded sample, including the last value tested."""
++    if len(values) < 6:
++        values.append(value)
++    elif len(values) == 6:
++        values[-1] = value
++        values.append(_ALL_ANY_MORE)
++    else:
++        values[-2] = value
++
++
+ def _call_reprcompare(ops, results, expls, each_obj):
+     for i, res, expl in zip(range(len(ops)), results, expls):
+         try:
+@@ -968,6 +1006,15 @@ warn_explicit(
+         """
+         visit `ast.Call` nodes on Python3.5 and after
+         """
++        if (
++            isinstance(call.func, ast.Name)
++            and call.func.id in ("all", "any")
++            and len(call.args) == 1
++            and not call.keywords
++            and not isinstance(call.args[0], ast.Starred)
++        ):
++            return self.visit_all_any_call(call)
++
+         new_func, func_expl = self.visit(call.func)
+         arg_expls = []
+         new_args = []
+@@ -1001,6 +1048,16 @@ warn_explicit(
+         """
+         visit `ast.Call nodes on 3.4 and below`
+         """
++        if (
++            isinstance(call.func, ast.Name)
++            and call.func.id in ("all", "any")
++            and len(call.args) == 1
++            and not call.keywords
++            and not call.starargs
++            and not call.kwargs
++        ):
++            return self.visit_all_any_call(call)
++
+         new_func, func_expl = self.visit(call.func)
+         arg_expls = []
+         new_args = []
+@@ -1027,6 +1084,38 @@ warn_explicit(
+         outer_expl = "%s\n{%s = %s\n}" % (res_expl, res_expl, expl)
+         return res, outer_expl
+ 
++    def visit_all_any_call(self, call):
++        """Rewrite all/any to report the values tested before short-circuiting."""
++        new_func, func_expl = self.visit(call.func)
++        new_func = self.assign(new_func)
++        iterable, _ = self.visit(call.args[0])
++        result_name = self.variable()
++        values_name = self.variable()
++        result = ast.Name(result_name, ast.Load())
++        values = ast.Name(values_name, ast.Load())
++        unpack = ast.Tuple(
++            [ast.Name(result_name, ast.Store()), ast.Name(values_name, ast.Store())],
++            ast.Store(),
++        )
++        self.statements.append(
++            ast.Assign([unpack], self.helper("_call_all_any", new_func, iterable))
++        )
++
++        res_expl = self.explanation_param(self.display(result))
++        values_or_iterable = ast.IfExp(
++            ast.Compare(values, [ast.Is()], [_NameConstant(None)]),
++            self.display(iterable),
++            self.display(values),
++        )
++        iterable_repr = self.explanation_param(values_or_iterable)
++        outer_expl = "%s\n{%s = %s(%s)\n}" % (
++            res_expl,
++            res_expl,
++            func_expl,
++            iterable_repr,
++        )
++        return result, outer_expl
++
+     # ast.Call signature changed on 3.5,
+     # conditionally change  which methods is named
+     # visit_Call depending on Python version
+diff --git a/testing/test_assertrewrite.py b/testing/test_assertrewrite.py
+index 87dada2..eb01e95 100644
+--- a/testing/test_assertrewrite.py
++++ b/testing/test_assertrewrite.py
+@@ -525,6 +525,87 @@ class TestAssertionRewrite(object):
+  +  where False = g(**{'a': 2})"""
+         )
+ 
++    def test_all_any(self):
++        even_stevens = list(range(1, 100, 2))
++
++        def is_even(number):
++            return number % 2 == 0
++
++        ns = {"even_stevens": even_stevens, "is_even": is_even}
++
++        def f():
++            assert all(is_even(number) for number in even_stevens)
++
++        assert getmsg(f, ns) == """assert False
++ +  where False = all([False])"""
++
++        def f():
++            assert all([is_even(number) for number in even_stevens])
++
++        assert getmsg(f, ns) == """assert False
++ +  where False = all([False, False, False, False, False, False, ...])"""
++
++        def f():
++            assert any(is_even(number) for number in even_stevens)
++
++        assert getmsg(f, ns) == """assert False
++ +  where False = any([False, False, False, False, False, False, ...])"""
++
++    def test_all_any_short_circuit(self):
++        evaluated = []
++
++        def truthy(number):
++            evaluated.append(number)
++            return number != 2
++
++        def f():
++            assert all(truthy(number) for number in (1, 2, 3))
++
++        assert getmsg(f, {"truthy": truthy}) == """assert False
++ +  where False = all([True, False])"""
++        assert evaluated == [1, 2]
++
++        evaluated[:] = []
++
++        def f():
++            assert all(truthy(number) for number in (1, 3))
++
++        getmsg(f, {"truthy": truthy}, must_pass=True)
++        assert evaluated == [1, 3]
++
++        evaluated[:] = []
++
++        def f():
++            assert all(truthy(number) for number in (3, 4, 5, 6, 7, 8, 2, 9))
++
++        assert getmsg(f, {"truthy": truthy}) == """assert False
++ +  where False = all([True, True, True, True, True, False, ...])"""
++        assert evaluated == [3, 4, 5, 6, 7, 8, 2]
++
++        evaluated[:] = []
++
++        def f():
++            assert not any(truthy(number) for number in (2, 3, 4))
++
++        assert getmsg(f, {"truthy": truthy}) == """assert not True
++ +  where True = any([False, True])"""
++        assert evaluated == [2, 3]
++
++    def test_all_shadowed_builtin(self):
++        received = []
++
++        def all(iterable):
++            received.append(iterable)
++            return False
++
++        def f():
++            assert all(number for number in range(3))
++
++        assert getmsg(f, {"all": all}).startswith(
++            "assert False\n +  where False = all("
++        )
++        assert next(received[0]) == 0
++
+     def test_attribute(self):
+         class X(object):
+             g = 3

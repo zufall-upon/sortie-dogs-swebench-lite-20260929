@@ -1,0 +1,37 @@
+diff --git a/sklearn/model_selection/_split.py b/sklearn/model_selection/_split.py
+index c49a3ce..cede2b5 100644
+--- a/sklearn/model_selection/_split.py
++++ b/sklearn/model_selection/_split.py
+@@ -1103,6 +1103,11 @@ class _RepeatedSplits(metaclass=ABCMeta):
+         self.random_state = random_state
+         self.cvargs = cvargs
+ 
++    def __repr__(self):
++        return ('{}(n_splits={!r}, n_repeats={!r}, random_state={!r})'
++                .format(self.__class__.__name__, self.cvargs['n_splits'],
++                        self.n_repeats, self.random_state))
++
+     def split(self, X, y=None, groups=None):
+         """Generates indices to split data into training and test set.
+ 
+diff --git a/sklearn/model_selection/tests/test_split.py b/sklearn/model_selection/tests/test_split.py
+index a38fb43..7f601d2 100644
+--- a/sklearn/model_selection/tests/test_split.py
++++ b/sklearn/model_selection/tests/test_split.py
+@@ -980,6 +980,16 @@ def test_repeated_cv_value_errors():
+         assert_raises(ValueError, cv, n_repeats=1.5)
+ 
+ 
++@pytest.mark.parametrize('CVSplitter', (RepeatedKFold,
++                                        RepeatedStratifiedKFold))
++def test_repeated_cv_repr(CVSplitter):
++    name = CVSplitter.__name__
++    assert repr(CVSplitter()) == (
++        '{}(n_splits=5, n_repeats=10, random_state=None)'.format(name))
++    assert repr(CVSplitter(n_splits=3, n_repeats=2, random_state=42)) == (
++        '{}(n_splits=3, n_repeats=2, random_state=42)'.format(name))
++
++
+ def test_repeated_kfold_determinstic_split():
+     X = [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
+     random_state = 258173307

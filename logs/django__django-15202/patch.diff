@@ -1,0 +1,54 @@
+diff --git a/django/core/validators.py b/django/core/validators.py
+index 72fbe15..620c7a0 100644
+--- a/django/core/validators.py
++++ b/django/core/validators.py
+@@ -127,7 +127,11 @@ class URLValidator(RegexValidator):
+                 raise
+         else:
+             # Now verify IPv6 in the netloc part
+-            host_match = re.search(r'^\[(.+)\](?::\d{1,5})?$', urlsplit(value).netloc)
++            try:
++                netloc = urlsplit(value).netloc
++            except ValueError:
++                raise ValidationError(self.message, code=self.code, params={'value': value})
++            host_match = re.search(r'^\[(.+)\](?::\d{1,5})?$', netloc)
+             if host_match:
+                 potential_ip = host_match[1]
+                 try:
+@@ -139,7 +143,11 @@ class URLValidator(RegexValidator):
+         # section 3.1. It's defined to be 255 bytes or less, but this includes
+         # one byte for the length of the name and one byte for the trailing dot
+         # that's used to indicate absolute names in DNS.
+-        if len(urlsplit(value).hostname) > 253:
++        try:
++            hostname = urlsplit(value).hostname
++        except ValueError:
++            raise ValidationError(self.message, code=self.code, params={'value': value})
++        if len(hostname) > 253:
+             raise ValidationError(self.message, code=self.code, params={'value': value})
+ 
+ 
+diff --git a/tests/forms_tests/field_tests/test_urlfield.py b/tests/forms_tests/field_tests/test_urlfield.py
+index 152456f..c66f4c0 100644
+--- a/tests/forms_tests/field_tests/test_urlfield.py
++++ b/tests/forms_tests/field_tests/test_urlfield.py
+@@ -89,6 +89,7 @@ class URLFieldTest(FormFieldAssertionsMixin, SimpleTestCase):
+             'http://-invalid.com',
+             'http://inv-.alid-.com',
+             'http://inv-.-alid.com',
++            '////]@N.AN',
+             '[a',
+             'http://[a',
+             # Non-string.
+diff --git a/tests/validators/tests.py b/tests/validators/tests.py
+index 78063a5..3a34dcf 100644
+--- a/tests/validators/tests.py
++++ b/tests/validators/tests.py
+@@ -215,6 +215,7 @@ INVALID_URLS = [
+     'http://[::1:2::3]:8080/',
+     'http://[]',
+     'http://[]:8080',
++    'http://foo]@example.com',
+     'http://example..com/',
+     'http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.e'
+     'xample.com',

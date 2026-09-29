@@ -1,0 +1,104 @@
+diff --git a/sphinx/builders/manpage.py b/sphinx/builders/manpage.py
+index 4166dec..a232b0c 100644
+--- a/sphinx/builders/manpage.py
++++ b/sphinx/builders/manpage.py
+@@ -24,7 +24,7 @@ from sphinx.util import logging
+ from sphinx.util import progress_message
+ from sphinx.util.console import darkgreen  # type: ignore
+ from sphinx.util.nodes import inline_all_toctrees
+-from sphinx.util.osutil import make_filename_from_project
++from sphinx.util.osutil import ensuredir, make_filename_from_project
+ from sphinx.writers.manpage import ManualPageWriter, ManualPageTranslator
+ 
+ 
+@@ -82,8 +82,10 @@ class ManualPageBuilder(Builder):
+ 
+             targetname = '%s.%s' % (name, section)
+             logger.info(darkgreen(targetname) + ' { ', nonl=True)
++            sectiondir = path.join(self.outdir, 'man%s' % section)
++            ensuredir(sectiondir)
+             destination = FileOutput(
+-                destination_path=path.join(self.outdir, targetname),
++                destination_path=path.join(sectiondir, targetname),
+                 encoding='utf-8')
+ 
+             tree = self.env.get_doctree(docname)
+diff --git a/tests/test_build_manpage.py b/tests/test_build_manpage.py
+index c3c41a2..a16329b 100644
+--- a/tests/test_build_manpage.py
++++ b/tests/test_build_manpage.py
+@@ -12,14 +12,15 @@ import pytest
+ 
+ from sphinx.builders.manpage import default_man_pages
+ from sphinx.config import Config
++from sphinx.util import docutils
+ 
+ 
+ @pytest.mark.sphinx('man')
+ def test_all(app, status, warning):
+     app.builder.build_all()
+-    assert (app.outdir / 'sphinxtests.1').exists()
++    assert (app.outdir / 'man1' / 'sphinxtests.1').exists()
+ 
+-    content = (app.outdir / 'sphinxtests.1').read_text()
++    content = (app.outdir / 'man1' / 'sphinxtests.1').read_text()
+     assert r'\fBprint \fP\fIi\fP\fB\en\fP' in content
+     assert r'\fBmanpage\en\fP' in content
+ 
+@@ -33,20 +34,28 @@ def test_all(app, status, warning):
+ @pytest.mark.sphinx('man', testroot='directive-code')
+ def test_captioned_code_block(app, status, warning):
+     app.builder.build_all()
+-    content = (app.outdir / 'python.1').read_text()
++    content = (app.outdir / 'man1' / 'python.1').read_text()
++
++    if docutils.__version_info__ >= (0, 21):
++        code_block = ('.EX\n'
++                      'def ruby?\n'
++                      '    false\n'
++                      'end\n'
++                      '.EE\n')
++    else:
++        code_block = ('.nf\n'
++                      '.ft C\n'
++                      'def ruby?\n'
++                      '    false\n'
++                      'end\n'
++                      '.ft P\n'
++                      '.fi\n')
+ 
+     assert ('.sp\n'
+             'caption \\fItest\\fP rb\n'
+             '.INDENT 0.0\n'
+             '.INDENT 3.5\n'
+-            '.sp\n'
+-            '.nf\n'
+-            '.ft C\n'
+-            'def ruby?\n'
+-            '    false\n'
+-            'end\n'
+-            '.ft P\n'
+-            '.fi\n'
++            '.sp\n' + code_block +
+             '.UNINDENT\n'
+             '.UNINDENT\n' in content)
+ 
+@@ -61,8 +70,17 @@ def test_default_man_pages():
+     assert default_man_pages(config) == expected
+ 
+ 
++@pytest.mark.sphinx('man', testroot='basic', confoverrides={
++    'man_pages': [('index', 'custom', 'description', [], 3)]})
++def test_configured_section(app, status, warning):
++    app.builder.build_all()
++
++    assert (app.outdir / 'man3' / 'custom.3').exists()
++    assert not (app.outdir / 'custom.3').exists()
++
++
+ @pytest.mark.sphinx('man', testroot='markup-rubric')
+ def test_rubric(app, status, warning):
+     app.build()
+-    content = (app.outdir / 'python.1').read_text()
++    content = (app.outdir / 'man1' / 'python.1').read_text()
+     assert 'This is a rubric\n' in content

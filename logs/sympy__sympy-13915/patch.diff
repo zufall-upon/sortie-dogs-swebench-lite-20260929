@@ -1,0 +1,33 @@
+diff --git a/sympy/core/mul.py b/sympy/core/mul.py
+index 4f01eee..1d45028 100644
+--- a/sympy/core/mul.py
++++ b/sympy/core/mul.py
+@@ -423,6 +423,8 @@ def _gather(c_powers):
+             changed = False
+             for b, e in c_powers:
+                 if e.is_zero:
++                    if b.has(S.ComplexInfinity):
++                        return [S.NaN], [], None
+                     continue
+                 if e is S.One:
+                     if b.is_Number:
+diff --git a/sympy/core/tests/test_subs.py b/sympy/core/tests/test_subs.py
+index 90abb9e..0b5ad21 100644
+--- a/sympy/core/tests/test_subs.py
++++ b/sympy/core/tests/test_subs.py
+@@ -719,6 +719,15 @@ def test_issue_5910():
+     assert (n/d).subs(t, 1) == zoo
+     assert (-n/-d).subs(t, 1) == zoo
+ 
++    a, b = symbols('a, b')
++    r = (1/(a + b) + 1/(a - b))/(1/(a + b) - 1/(a - b))
++    assert r.subs(b, a) is S.NaN
++
++
++def test_undefined_reciprocal_cancellation():
++    r = (1/(x + 2*y) + 1/(x - y))/(1/(x + 2*y) - 1/(x - y))
++    assert r.subs(y, x) is S.NaN
++
+ 
+ def test_issue_5217():
+     s = Symbol('s')

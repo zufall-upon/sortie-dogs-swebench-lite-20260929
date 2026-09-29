@@ -1,0 +1,64 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 33cc636..5f85e5c 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -749,6 +749,7 @@ class Query(BaseExpression):
+                 else:
+                     cur_model = source.remote_field.model
+                 opts = cur_model._meta
++                cur_model = opts.concrete_model
+                 # Even if we're "just passing through" this model, we must add
+                 # both the current model's pk and the related reference field
+                 # (if it's not a reverse relation) to the things we select.
+diff --git a/tests/defer/models.py b/tests/defer/models.py
+index 6de2e2a..19451b5 100644
+--- a/tests/defer/models.py
++++ b/tests/defer/models.py
+@@ -10,6 +10,15 @@ class Secondary(models.Model):
+     second = models.CharField(max_length=50)
+ 
+ 
++class ProxySecondary(Secondary):
++    class Meta:
++        proxy = True
++
++
++class ProxySecondaryHolder(models.Model):
++    secondary = models.ForeignKey(ProxySecondary, models.CASCADE)
++
++
+ class Primary(models.Model):
+     name = models.CharField(max_length=50)
+     value = models.CharField(max_length=50)
+diff --git a/tests/defer/tests.py b/tests/defer/tests.py
+index d2cff25..f41e47c 100644
+--- a/tests/defer/tests.py
++++ b/tests/defer/tests.py
+@@ -6,6 +6,8 @@ from .models import (
+     Child,
+     ChildProxy,
+     Primary,
++    ProxySecondary,
++    ProxySecondaryHolder,
+     RefreshPrimaryProxy,
+     Secondary,
+     ShadowChild,
+@@ -241,6 +243,18 @@ class BigChildDeferTests(AssertionMixin, TestCase):
+ 
+ 
+ class TestDefer2(AssertionMixin, TestCase):
++    def test_only_related_proxy(self):
++        secondary = ProxySecondary.objects.create(first="x1", second="x2")
++        ProxySecondaryHolder.objects.create(secondary=secondary)
++
++        with self.assertNumQueries(1):
++            holder = ProxySecondaryHolder.objects.select_related("secondary").only(
++                "secondary__first"
++            ).get()
++            self.assertEqual(holder.secondary.first, "x1")
++            self.assertEqual(holder.secondary.pk, secondary.pk)
++            self.assert_delayed(holder.secondary, 1)
++
+     def test_defer_proxy(self):
+         """
+         Ensure select_related together with only on a proxy model behaves

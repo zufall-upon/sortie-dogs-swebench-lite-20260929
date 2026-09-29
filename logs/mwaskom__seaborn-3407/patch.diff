@@ -1,0 +1,49 @@
+diff --git a/seaborn/axisgrid.py b/seaborn/axisgrid.py
+index 7534909..7b1b3e2 100644
+--- a/seaborn/axisgrid.py
++++ b/seaborn/axisgrid.py
+@@ -1472,7 +1472,7 @@ class PairGrid(Grid):
+                 for ax in diag_axes[1:]:
+                     share_axis(diag_axes[0], ax, "y")
+ 
+-            self.diag_vars = np.array(diag_vars, np.object_)
++            self.diag_vars = np.fromiter(diag_vars, dtype=object)
+             self.diag_axes = np.array(diag_axes, np.object_)
+ 
+         if "hue" not in signature(func).parameters:
+diff --git a/tests/test_axisgrid.py b/tests/test_axisgrid.py
+index ce8b0ea..e267381 100644
+--- a/tests/test_axisgrid.py
++++ b/tests/test_axisgrid.py
+@@ -1314,6 +1314,31 @@ class TestPairGrid:
+         for ax in g.diag_axes:
+             assert len(ax.collections) == n
+ 
++    def test_pairplot_multiindex(self):
++
++        data = pd.DataFrame({
++            ("A", "1"): np.arange(4),
++            ("A", "2"): np.arange(4) + 10,
++            ("B", "1"): np.arange(4) + 20,
++            ("B", "2"): np.arange(4) + 30,
++        })
++        bins = [-.5, 9.5, 19.5, 29.5, 39.5]
++        g = ag.pairplot(data, diag_kws={"bins": bins})
++
++        for i, var in enumerate(data.columns):
++            ax = g.diag_axes[i]
++            heights = [patch.get_height() for patch in ax.patches]
++            expected, _ = np.histogram(data[var], bins=bins)
++            npt.assert_array_equal(heights, expected)
++
++        for i in range(len(data.columns)):
++            for j in range(len(data.columns)):
++                if i == j:
++                    continue
++                x, y = g.axes[i, j].collections[0].get_offsets().T
++                npt.assert_array_equal(x, data.iloc[:, j])
++                npt.assert_array_equal(y, data.iloc[:, i])
++
+     def test_pairplot_reg(self):
+ 
+         vars = ["x", "y", "z"]

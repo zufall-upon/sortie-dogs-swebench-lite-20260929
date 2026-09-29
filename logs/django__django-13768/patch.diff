@@ -1,0 +1,72 @@
+diff --git a/django/dispatch/dispatcher.py b/django/dispatch/dispatcher.py
+index b7d9d26..87db6f9 100644
+--- a/django/dispatch/dispatcher.py
++++ b/django/dispatch/dispatcher.py
+@@ -1,3 +1,4 @@
++import logging
+ import threading
+ import warnings
+ import weakref
+@@ -6,6 +7,9 @@ from django.utils.deprecation import RemovedInDjango40Warning
+ from django.utils.inspect import func_accepts_kwargs
+ 
+ 
++logger = logging.getLogger('django.dispatch')
++
++
+ def _make_id(target):
+     if hasattr(target, '__func__'):
+         return (id(target.__self__), id(target.__func__))
+@@ -208,6 +212,10 @@ class Signal:
+             try:
+                 response = receiver(signal=self, sender=sender, **named)
+             except Exception as err:
++                logger.exception(
++                    'Error calling %s in Signal.send_robust()',
++                    receiver,
++                )
+                 responses.append((receiver, err))
+             else:
+                 responses.append((receiver, response))
+diff --git a/tests/dispatch/tests.py b/tests/dispatch/tests.py
+index 9b5482e..de42580 100644
+--- a/tests/dispatch/tests.py
++++ b/tests/dispatch/tests.py
+@@ -1,4 +1,5 @@
+ import gc
++import logging
+ import sys
+ import weakref
+ from types import TracebackType
+@@ -164,14 +165,30 @@ class DispatcherTests(SimpleTestCase):
+     def test_send_robust_fail(self):
+         def fails(val, **kwargs):
+             raise ValueError('this')
++        def succeeds(val, **kwargs):
++            return val
+         a_signal.connect(fails)
+-        result = a_signal.send_robust(sender=self, val="test")
++        a_signal.connect(succeeds)
++        with self.assertLogs('django.dispatch', 'ERROR') as cm:
++            result = a_signal.send_robust(sender=self, val="test")
+         err = result[0][1]
+         self.assertIsInstance(err, ValueError)
+         self.assertEqual(err.args, ('this',))
+         self.assertTrue(hasattr(err, '__traceback__'))
+         self.assertIsInstance(err.__traceback__, TracebackType)
++        self.assertEqual(result[1], (succeeds, 'test'))
++        self.assertEqual(len(cm.records), 1)
++        log_record = cm.records[0]
++        self.assertEqual(log_record.levelno, logging.ERROR)
++        self.assertEqual(
++            log_record.getMessage(),
++            'Error calling %s in Signal.send_robust()' % fails,
++        )
++        self.assertIsNotNone(log_record.exc_info)
++        self.assertIs(log_record.exc_info[0], ValueError)
++        self.assertEqual(log_record.exc_info[1].args, ('this',))
+         a_signal.disconnect(fails)
++        a_signal.disconnect(succeeds)
+         self.assertTestIsClean(a_signal)
+ 
+     def test_disconnection(self):

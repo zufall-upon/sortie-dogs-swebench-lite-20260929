@@ -1,0 +1,40 @@
+diff --git a/sympy/core/mod.py b/sympy/core/mod.py
+index 11c8007..1bb5dcd 100644
+--- a/sympy/core/mod.py
++++ b/sympy/core/mod.py
+@@ -39,7 +39,8 @@ def doit(p, q):
+             if p.is_infinite or q.is_infinite or p is nan or q is nan:
+                 return nan
+             if (p == q or p == -q or
+-                    p.is_Pow and p.exp.is_Integer and p.base == q or
++                    p.is_Pow and p.exp.is_Integer and p.exp.is_positive and
++                    p.base.is_integer and p.base == q or
+                     p.is_integer and q == 1):
+                 return S.Zero
+ 
+diff --git a/sympy/core/tests/test_arit.py b/sympy/core/tests/test_arit.py
+index 06d6520..b31d287 100644
+--- a/sympy/core/tests/test_arit.py
++++ b/sympy/core/tests/test_arit.py
+@@ -1577,6 +1577,13 @@ def test_Mod():
+     assert (12*x + 18*y) % (3*x) == 3*Mod(6*y, x)
+ 
+     # gcd extraction
++    assert x**2 % x == x*Mod(x, 1)
++    noninteger = Symbol('noninteger', noninteger=True)
++    assert Mod(noninteger**2, noninteger) == noninteger*Mod(noninteger, 1)
++    assert Mod(x**-1, x) != 0
++    i = Symbol('i', integer=True)
++    assert Mod(i**2, i) == 0
++    assert Mod(i**-1, i) != 0
+     assert (-3*x) % (-2*y) == -Mod(3*x, 2*y)
+     assert (.6*pi) % (.3*x*pi) == 0.3*pi*Mod(2, x)
+     assert (.6*pi) % (.31*x*pi) == pi*Mod(0.6, 0.31*x)
+@@ -1590,7 +1597,6 @@ def test_Mod():
+     assert (2*x + 2) % (x + 1) == 0
+     assert (x*(x + 1)) % (x + 1) == (x + 1)*Mod(x, 1)
+     assert Mod(5.0*x, 0.1*y) == 0.1*Mod(50*x, y)
+-    i = Symbol('i', integer=True)
+     assert (3*i*x) % (2*i*y) == i*Mod(3*x, 2*y)
+     assert Mod(4*i, 4) == 0
+ 

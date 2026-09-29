@@ -1,0 +1,32 @@
+diff --git a/django/utils/autoreload.py b/django/utils/autoreload.py
+index 7ca0d68..5a2b0ff 100644
+--- a/django/utils/autoreload.py
++++ b/django/utils/autoreload.py
+@@ -103,7 +103,10 @@ def iter_all_python_module_files():
+     # aren't loaded on the fly.
+     keys = sorted(sys.modules)
+     modules = tuple(m for m in map(sys.modules.__getitem__, keys) if not isinstance(m, weakref.ProxyTypes))
+-    return iter_modules_and_files(modules, frozenset(_error_files))
++    extra_files = set(_error_files)
++    if sys.argv and sys.argv[0]:
++        extra_files.add(sys.argv[0])
++    return iter_modules_and_files(modules, frozenset(extra_files))
+ 
+ 
+ @functools.lru_cache(maxsize=1)
+diff --git a/tests/utils_tests/test_autoreload.py b/tests/utils_tests/test_autoreload.py
+index 42bcd0a..93a6942 100644
+--- a/tests/utils_tests/test_autoreload.py
++++ b/tests/utils_tests/test_autoreload.py
+@@ -625,6 +625,11 @@ class StatReloaderTests(ReloaderTests, IntegrationTests):
+         # Shorten the sleep time to speed up tests.
+         self.reloader.SLEEP_TIME = 0.01
+ 
++    def test_watched_files_includes_running_script(self):
++        filename = 'tests/i18n/sampleproject/manage.py'
++        with mock.patch.object(sys, 'argv', [filename]):
++            self.assertIn(Path(filename).resolve(), self.reloader.watched_files())
++
+     def test_snapshot_files_ignores_missing_files(self):
+         with mock.patch.object(self.reloader, 'watched_files', return_value=[self.nonexistent_file]):
+             self.assertEqual(dict(self.reloader.snapshot_files()), {})

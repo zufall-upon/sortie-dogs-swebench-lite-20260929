@@ -1,0 +1,110 @@
+diff --git a/lib/matplotlib/offsetbox.py b/lib/matplotlib/offsetbox.py
+index 77768e7..92b513c 100644
+--- a/lib/matplotlib/offsetbox.py
++++ b/lib/matplotlib/offsetbox.py
+@@ -1511,7 +1511,7 @@ class DraggableBase:
+     canvas = property(lambda self: self.ref_artist.figure.canvas)
+ 
+     def on_motion(self, evt):
+-        if self._check_still_parented() and self.got_artist:
++        if self._check_still_parented(evt.canvas) and self.got_artist:
+             dx = evt.x - self.mouse_x
+             dy = evt.y - self.mouse_y
+             self.update_offset(dx, dy)
+@@ -1524,7 +1524,7 @@ class DraggableBase:
+                 self.canvas.draw()
+ 
+     def on_pick(self, evt):
+-        if self._check_still_parented() and evt.artist == self.ref_artist:
++        if self._check_still_parented(evt.canvas) and evt.artist == self.ref_artist:
+             self.mouse_x = evt.mouseevent.x
+             self.mouse_y = evt.mouseevent.y
+             self.got_artist = True
+@@ -1541,7 +1541,7 @@ class DraggableBase:
+             self.save_offset()
+ 
+     def on_release(self, event):
+-        if self._check_still_parented() and self.got_artist:
++        if self._check_still_parented(event.canvas) and self.got_artist:
+             self.finalize_offset()
+             self.got_artist = False
+             self.canvas.mpl_disconnect(self._c1)
+@@ -1549,23 +1549,28 @@ class DraggableBase:
+             if self._use_blit:
+                 self.ref_artist.set_animated(False)
+ 
+-    def _check_still_parented(self):
++    def _check_still_parented(self, canvas=None):
+         if self.ref_artist.figure is None:
+-            self.disconnect()
++            self.disconnect(canvas)
++            self.got_artist = False
++            if self._use_blit:
++                self.ref_artist.set_animated(False)
+             return False
+         else:
+             return True
+ 
+-    def disconnect(self):
++    def disconnect(self, canvas=None):
+         """Disconnect the callbacks."""
++        if canvas is None:
++            canvas = self.canvas
+         for cid in self.cids:
+-            self.canvas.mpl_disconnect(cid)
++            canvas.mpl_disconnect(cid)
+         try:
+             c1 = self._c1
+         except AttributeError:
+             pass
+         else:
+-            self.canvas.mpl_disconnect(c1)
++            canvas.mpl_disconnect(c1)
+ 
+     def save_offset(self):
+         pass
+diff --git a/lib/matplotlib/tests/test_offsetbox.py b/lib/matplotlib/tests/test_offsetbox.py
+index cd57122..d84108d 100644
+--- a/lib/matplotlib/tests/test_offsetbox.py
++++ b/lib/matplotlib/tests/test_offsetbox.py
+@@ -9,7 +9,7 @@ from matplotlib.testing.decorators import check_figures_equal, image_comparison
+ import matplotlib.pyplot as plt
+ import matplotlib.patches as mpatches
+ import matplotlib.lines as mlines
+-from matplotlib.backend_bases import MouseButton, MouseEvent
++from matplotlib.backend_bases import MouseButton, MouseEvent, PickEvent
+ 
+ from matplotlib.offsetbox import (
+     AnchoredOffsetbox, AnnotationBbox, AnchoredText, DrawingArea, HPacker,
+@@ -242,6 +242,31 @@ def test_picking(child_type, boxcoords):
+     assert len(calls) == 0
+ 
+ 
++@pytest.mark.parametrize("picked", [False, True])
++def test_draggable_annotation_removed_before_release(picked):
++    fig, ax = plt.subplots()
++    ax.scatter([1], [1])
++    ann = ax.annotate("a", (1, 1))
++    draggable = ann.draggable()
++
++    if picked:
++        mouseevent = MouseEvent(
++            "button_press_event", fig.canvas, 0, 0, MouseButton.LEFT)
++        PickEvent("pick_event", fig.canvas, mouseevent, ann)._process()
++        motion_cid = draggable._c1
++
++    ann.remove()
++    MouseEvent("button_release_event", fig.canvas, 0, 0)._process()
++
++    callbacks = fig.canvas.callbacks.callbacks
++    for signal, cid in zip(
++            ("pick_event", "button_release_event"), draggable.cids):
++        assert cid not in callbacks.get(signal, {})
++    if picked:
++        assert motion_cid not in callbacks.get("motion_notify_event", {})
++    assert not draggable.got_artist
++
++
+ @image_comparison(['anchoredtext_align.png'], remove_text=True, style='mpl20')
+ def test_anchoredtext_horizontal_alignment():
+     fig, ax = plt.subplots()

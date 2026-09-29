@@ -1,0 +1,39 @@
+diff --git a/django/contrib/auth/forms.py b/django/contrib/auth/forms.py
+index 20d8922..6a14b45 100644
+--- a/django/contrib/auth/forms.py
++++ b/django/contrib/auth/forms.py
+@@ -34,6 +34,9 @@ class ReadOnlyPasswordHashWidget(forms.Widget):
+     template_name = 'auth/widgets/read_only_password_hash.html'
+     read_only = True
+ 
++    def id_for_label(self, id_):
++        return ''
++
+     def get_context(self, name, value, attrs):
+         context = super().get_context(name, value, attrs)
+         summary = []
+diff --git a/tests/auth_tests/test_forms.py b/tests/auth_tests/test_forms.py
+index 7a731be..3bb371a 100644
+--- a/tests/auth_tests/test_forms.py
++++ b/tests/auth_tests/test_forms.py
+@@ -2,6 +2,7 @@ import datetime
+ import re
+ from unittest import mock
+ 
++from django import forms
+ from django.contrib.auth.forms import (
+     AdminPasswordChangeForm, AuthenticationForm, PasswordChangeForm,
+     PasswordResetForm, ReadOnlyPasswordHashField, ReadOnlyPasswordHashWidget,
+@@ -997,6 +998,12 @@ class PasswordResetFormTest(TestDataMixin, TestCase):
+ 
+ class ReadOnlyPasswordHashTest(SimpleTestCase):
+ 
++    def test_label_tag(self):
++        class PasswordForm(forms.Form):
++            password = ReadOnlyPasswordHashField()
++
++        self.assertEqual(PasswordForm()['password'].label_tag(), '<label>Password:</label>')
++
+     def test_bug_19349_render_with_none_value(self):
+         # Rendering the widget with value set to None
+         # mustn't raise an exception.

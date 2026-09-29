@@ -1,0 +1,64 @@
+diff --git a/sympy/simplify/tests/test_trigsimp.py b/sympy/simplify/tests/test_trigsimp.py
+index bf15ee0..c548e18 100644
+--- a/sympy/simplify/tests/test_trigsimp.py
++++ b/sympy/simplify/tests/test_trigsimp.py
+@@ -199,6 +199,14 @@ def test_trigsimp_issues():
+     assert trigsimp(-sin(x)**4 - 2*sin(x)**2*cos(x)**2 - cos(x)**4) == -1
+ 
+ 
++def test_trigsimp_sqrt_of_squared_sin():
++    e = cos(x) + sqrt(sin(x)**2)
++    assert trigsimp(e).subs(x, -I) == e.subs(x, -I)
++
++    # Combining ordinary sine and cosine terms remains valid.
++    assert trigsimp(cos(x) + sin(x)) == sqrt(2)*sin(x + pi/4)
++
++
+ def test_trigsimp_issue_2515():
+     x = Symbol('x')
+     assert trigsimp(x*cos(x)*tan(x)) == x*sin(x)
+diff --git a/sympy/simplify/trigsimp.py b/sympy/simplify/trigsimp.py
+index 7ca05f0..82b099c 100644
+--- a/sympy/simplify/trigsimp.py
++++ b/sympy/simplify/trigsimp.py
+@@ -8,6 +8,7 @@
+ from sympy.core.compatibility import reduce, iterable, SYMPY_INTS
+ from sympy.core.function import count_ops, _mexpand
+ from sympy.core.numbers import I, Integer
++from sympy.core.power import Pow
+ from sympy.functions import sin, cos, exp, cosh, tanh, sinh, tan, cot, coth
+ from sympy.functions.elementary.hyperbolic import HyperbolicFunction
+ from sympy.functions.elementary.trigonometric import TrigonometricFunction
+@@ -475,6 +476,20 @@ def trigsimp(expr, **opts):
+     if _eval_trigsimp is not None:
+         return _eval_trigsimp(**opts)
+ 
++    # A square root of an even power of a trigonometric function cannot be
++    # treated as a signed trigonometric function for a general complex
++    # argument. Keep such powers opaque while applying the trigonometric
++    # transformations (in particular TR10i, which may otherwise combine
++    # sqrt(sin(x)**2) with cos(x) as though it were sin(x)).
++    protected = {
++        p: Dummy('trigsimp') for p in expr.atoms(Pow)
++        if p.exp is S.Half and p.base.is_Pow and
++        p.base.exp.is_even is True and
++        isinstance(p.base.base, TrigonometricFunction)
++    }
++    if protected:
++        expr = expr.xreplace(protected)
++
+     old = opts.pop('old', False)
+     if not old:
+         opts.pop('deep', None)
+@@ -505,7 +520,10 @@ def traverse(e):
+         'old': lambda x: trigsimp_old(x, **opts),
+                    }[method]
+ 
+-    return trigsimpfunc(expr)
++    result = trigsimpfunc(expr)
++    if protected:
++        result = result.xreplace({v: k for k, v in protected.items()})
++    return result
+ 
+ 
+ def exptrigsimp(expr):

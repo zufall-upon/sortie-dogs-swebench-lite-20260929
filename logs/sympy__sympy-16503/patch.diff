@@ -1,0 +1,49 @@
+diff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py
+index 7a3de33..9d8e24b 100644
+--- a/sympy/printing/pretty/pretty.py
++++ b/sympy/printing/pretty/pretty.py
+@@ -630,6 +630,9 @@ def adjust(s, wid=None, how='<^>'):
+             prettyF = prettyForm(*prettySign.right(prettyF))
+ 
+         prettyF.baseline = max_upper + sign_height//2
++        # Account for the extra row when centering a one-line summand.
++        if H == 3:
++            prettyF.baseline -= adjustment
+         prettyF.binding = prettyForm.MUL
+         return prettyF
+ 
+diff --git a/sympy/printing/pretty/tests/test_pretty.py b/sympy/printing/pretty/tests/test_pretty.py
+index 4c48fda..d61cd99 100644
+--- a/sympy/printing/pretty/tests/test_pretty.py
++++ b/sympy/printing/pretty/tests/test_pretty.py
+@@ -4612,6 +4612,30 @@ def test_pretty_sum():
+     assert pretty(expr) == ascii_str
+     assert upretty(expr) == ucode_str
+ 
++    expr = Sum(x, (x, 1, oo)) + 3
++    ascii_str = \
++"""\
++  oo       \n\
++ __        \n\
++ \\ `       \n\
++  )   x + 3\n\
++ /_,       \n\
++x = 1      \
++"""
++    ucode_str = \
++u("""\
++  ∞        \n\
++ ___       \n\
++ ╲         \n\
++  ╲   x + 3\n\
++  ╱        \n\
++ ╱         \n\
++ ‾‾‾       \n\
++x = 1      \
++""")
++    assert pretty(expr) == ascii_str
++    assert upretty(expr) == ucode_str
++
+     expr = Sum(x**2, (x, 0, oo))
+     ascii_str = \
+ u("""\

@@ -1,0 +1,78 @@
+diff --git a/sympy/core/mod.py b/sympy/core/mod.py
+index b4f3de2..1d54735 100644
+--- a/sympy/core/mod.py
++++ b/sympy/core/mod.py
+@@ -41,6 +41,7 @@ def eval(cls, p, q):
+         from sympy.core.singleton import S
+         from sympy.core.exprtools import gcd_terms
+         from sympy.polys.polytools import gcd
++        from sympy.polys.polyerrors import PolynomialError
+ 
+         def doit(p, q):
+             """Try to return p % q if both are numbers or +/-p is known
+@@ -166,7 +167,10 @@ def doit(p, q):
+         # XXX other possibilities?
+ 
+         # extract gcd; any further simplification should be done by the user
+-        G = gcd(p, q)
++        try:
++            G = gcd(p, q)
++        except PolynomialError:
++            G = S.One
+         if G != 1:
+             p, q = [
+                 gcd_terms(i/G, clear=False, fraction=False) for i in (p, q)]
+diff --git a/sympy/core/tests/test_arit.py b/sympy/core/tests/test_arit.py
+index 2dc6589..2ff4520 100644
+--- a/sympy/core/tests/test_arit.py
++++ b/sympy/core/tests/test_arit.py
+@@ -1772,6 +1772,11 @@ def test_Mod():
+     assert Mod(1, nan) is nan
+     assert Mod(nan, nan) is nan
+ 
++    from sympy import Piecewise
++    pw = Piecewise((x, x < y), (y, True))
++    assert Mod(pw, pi) == Mod(pw, pi, evaluate=False)
++    assert Mod(pi, pw) == Mod(pi, pw, evaluate=False)
++
+     Mod(0, x) == 0
+     with raises(ZeroDivisionError):
+         Mod(x, 0)
+diff --git a/sympy/core/tests/test_subs.py b/sympy/core/tests/test_subs.py
+index 8a3d81d..2964ab7 100644
+--- a/sympy/core/tests/test_subs.py
++++ b/sympy/core/tests/test_subs.py
+@@ -20,6 +20,33 @@ def test_subs():
+     assert e == Rational(6)
+ 
+ 
++def test_subs_piecewise_hyperbolic_real():
++    from sympy import sinh, cosh, tanh
++    from sympy.core.cache import clear_cache
++
++    clear_cache()
++    x, y, z = symbols('x y z')
++    expr = exp(sinh(Piecewise((x, y > x), (y, True)) / z))
++    expected = exp(sinh(z**-1.0*Piecewise((x, y > x), (y, True))))
++    assert expr.subs({1: 1.0}) == expected
++
++    clear_cache()
++    x, y, z = symbols('x y z', real=True)
++    expr = exp(sinh(Piecewise((x, y > x), (y, True)) / z))
++    expected = exp(sinh(z**-1.0*Piecewise((x, y > x), (y, True))))
++    assert expr.subs({1: 1.0}) == expected
++    assert expr.subs({1: 1.0}) == expected
++
++    for func in (cosh, tanh):
++        clear_cache()
++        x, y, z = symbols('x y z', real=True)
++        piecewise = Piecewise((x, y > x), (y, True))
++        expr = exp(func(piecewise / z))
++        expected = exp(func(z**-1.0*piecewise))
++        assert expr.subs({1: 1.0}) == expected
++        assert expr.subs({1: 1.0}) == expected
++
++
+ def test_subs_Matrix():
+     z = zeros(2)
+     z1 = ZeroMatrix(2, 2)

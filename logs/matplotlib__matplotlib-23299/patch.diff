@@ -1,0 +1,110 @@
+diff --git a/lib/matplotlib/__init__.py b/lib/matplotlib/__init__.py
+index c268a56..4ca2d09 100644
+--- a/lib/matplotlib/__init__.py
++++ b/lib/matplotlib/__init__.py
+@@ -623,6 +623,7 @@ class RcParams(MutableMapping, dict):
+ 
+     # validate values on the way in
+     def __init__(self, *args, **kwargs):
++        self._backend_auto_resolution_count = 0
+         self.update(*args, **kwargs)
+ 
+     def __setitem__(self, key, val):
+@@ -650,6 +651,8 @@ class RcParams(MutableMapping, dict):
+             except ValueError as ve:
+                 raise ValueError(f"Key {key}: {ve}") from None
+             dict.__setitem__(self, key, cval)
++            if key == "backend" and self is globals().get("rcParamsOrig"):
++                self._backend_auto_resolution_count += 1
+         except KeyError as err:
+             raise KeyError(
+                 f"{key} is not a valid rc parameter (see rcParams.keys() for "
+@@ -1088,14 +1091,28 @@ def rc_context(rc=None, fname=None):
+ 
+     """
+     orig = rcParams.copy()
++    orig_backend = rcParams._get_backend_or_none()
++    yielded = False
+     try:
+         if fname:
+             rc_file(fname)
+         if rc:
+             rcParams.update(rc)
++        context_backend = rcParams._get_backend_or_none()
++        backend_auto_resolution_count = \
++            rcParamsOrig._backend_auto_resolution_count
++        yielded = True
+         yield
+     finally:
++        backend = (
++            rcParamsOrig._get_backend_or_none()
++            if (yielded and orig_backend is None and context_backend is None
++                and rcParamsOrig._backend_auto_resolution_count
++                > backend_auto_resolution_count)
++            else None)
+         dict.update(rcParams, orig)  # Revert to the original rcs.
++        if backend is not None:
++            rcParams["backend"] = backend
+ 
+ 
+ def use(backend, *, force=True):
+diff --git a/lib/matplotlib/tests/test_rcparams.py b/lib/matplotlib/tests/test_rcparams.py
+index 99856b3..f1af167 100644
+--- a/lib/matplotlib/tests/test_rcparams.py
++++ b/lib/matplotlib/tests/test_rcparams.py
+@@ -69,6 +69,43 @@ def test_rcparams(tmpdir):
+     assert mpl.rcParams['lines.linewidth'] == 33
+ 
+ 
++def test_get_backend_preserves_figures_in_rc_context():
++    script = """
++import matplotlib as mpl
++import matplotlib.pyplot as plt
++from matplotlib import get_backend, rc_context
++
++assert mpl.rcParams._get_backend_or_none() is None
++with rc_context():
++    mpl.rcParams['backend'] = 'svg'
++assert mpl.rcParams._get_backend_or_none() is None
++
++with rc_context():
++    fig = plt.figure()
++figures = plt._pylab_helpers.Gcf.figs.copy()
++get_backend()
++assert plt._pylab_helpers.Gcf.figs == figures
++plt.close(fig)
++"""
++    env = {**os.environ, "MPLBACKEND": ""}
++    subprocess.run([sys.executable, "-c", script], env=env, check=True)
++
++
++def test_rc_context_backend_assignment_is_temporary():
++    mpl.use('agg')
++    backend = mpl.rcParams._get_backend_or_none()
++    with mpl.rc_context():
++        mpl.rcParams['backend'] = 'svg'
++    assert mpl.rcParams._get_backend_or_none() == backend
++
++
++def test_rc_context_explicit_backend_restored():
++    backend = mpl.rcParams._get_backend_or_none()
++    with mpl.rc_context(rc={'backend': 'svg'}):
++        assert mpl.rcParams._get_backend_or_none() == 'svg'
++    assert mpl.rcParams._get_backend_or_none() == backend
++
++
+ def test_RcParams_class():
+     rc = mpl.RcParams({'font.cursive': ['Apple Chancery',
+                                         'Textile',
+@@ -506,6 +543,11 @@ def test_rcparams_reset_after_fail():
+             with mpl.rc_context(rc={'text.usetex': True, 'test.blah': True}):
+                 pass
+         assert mpl.rcParams['text.usetex'] is False
++        backend = mpl.rcParams._get_backend_or_none()
++        with pytest.raises(KeyError):
++            with mpl.rc_context(rc={'backend': 'svg', 'test.blah': True}):
++                pass
++        assert mpl.rcParams._get_backend_or_none() == backend
+ 
+ 
+ @pytest.mark.skipif(sys.platform != "linux", reason="Linux only")

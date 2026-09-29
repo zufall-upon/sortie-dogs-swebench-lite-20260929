@@ -1,0 +1,185 @@
+diff --git a/xarray/core/concat.py b/xarray/core/concat.py
+index ecae256..40232d5 100644
+--- a/xarray/core/concat.py
++++ b/xarray/core/concat.py
+@@ -1,3 +1,4 @@
++import numpy as np
+ import pandas as pd
+ 
+ from . import dtypes, utils
+@@ -187,8 +188,17 @@ def _calc_concat_over(datasets, dim, dim_names, data_vars, coords, compat):
+                         % subset
+                     )
+                 # all nonindexes that are not the same in each dataset
+-                for k in getattr(datasets[0], subset):
++                subset_vars = []
++                for ds in datasets:
++                    subset_vars.extend(
++                        k for k in getattr(ds, subset) if k not in subset_vars
++                    )
++                for k in subset_vars:
+                     if k not in concat_over:
++                        if any(k not in ds.variables for ds in datasets):
++                            concat_over.add(k)
++                            equals[k] = False
++                            continue
+                         # Compare the variable of all datasets vs. the one
+                         # of the first dataset. Perform the minimum amount of
+                         # loads in order to avoid multiple loads from disk
+@@ -211,9 +221,13 @@ def _calc_concat_over(datasets, dim, dim_names, data_vars, coords, compat):
+                             equals[k] = True
+ 
+             elif opt == "all":
+-                concat_over.update(
+-                    set(getattr(datasets[0], subset)) - set(datasets[0].dims)
+-                )
++                if subset == "data_vars":
++                    subset_vars = set().union(
++                        *(set(ds.data_vars) for ds in datasets)
++                    )
++                else:
++                    subset_vars = set(getattr(datasets[0], subset))
++                concat_over.update(subset_vars - set(datasets[0].dims))
+             elif opt == "minimal":
+                 pass
+             else:
+@@ -339,29 +353,54 @@ def _dataset_concat(
+         if compat == "identical" and not utils.dict_equiv(ds.attrs, result_attrs):
+             raise ValueError("Dataset global attributes not equal.")
+ 
+-    # we've already verified everything is consistent; now, calculate
+-    # shared dimension sizes so we can expand the necessary variables
+-    def ensure_common_dims(vars):
+-        # ensure each variable with the given name shares the same
+-        # dimensions and the same shape for all of them except along the
+-        # concat dimension
+-        common_dims = tuple(pd.unique([d for v in vars for d in v.dims]))
+-        if dim not in common_dims:
+-            common_dims = (dim,) + common_dims
+-        for var, dim_len in zip(vars, concat_dim_lengths):
+-            if var.dims != common_dims:
+-                common_shape = tuple(dims_sizes.get(d, dim_len) for d in common_dims)
+-                var = var.set_dims(common_dims, common_shape)
+-            yield var
+-
+     # stack up each variable to fill-out the dataset (in order)
+     # n.b. this loop preserves variable order, needed for groupby.
+-    for k in datasets[0].variables:
++    concat_order = list(datasets[0].variables)
++    for ds in datasets[1:]:
++        concat_order.extend(k for k in ds.variables if k not in concat_order)
++
++    for k in concat_order:
+         if k in concat_over:
+-            try:
+-                vars = ensure_common_dims([ds.variables[k] for ds in datasets])
+-            except KeyError:
+-                raise ValueError("%r is not present in all datasets." % k)
++            present_vars = [ds.variables[k] for ds in datasets if k in ds.variables]
++            if len(present_vars) != len(datasets) and k not in data_names:
++                # Coordinates must be present on all datasets. Leave them out
++                # here if they were introduced later, so the coordinate
++                # consistency check below can report the usual error.
++                if k in datasets[0].variables:
++                    raise ValueError("%r is not present in all datasets." % k)
++                continue
++
++            common_dims = tuple(
++                pd.unique([d for var in present_vars for d in var.dims])
++            )
++            if dim not in common_dims:
++                common_dims = (dim,) + common_dims
++            template = present_vars[0]
++
++            vars = []
++            for ds, dim_len in zip(datasets, concat_dim_lengths):
++                common_shape = tuple(dims_sizes.get(d, dim_len) for d in common_dims)
++                if k in ds.variables:
++                    var = ds.variables[k]
++                    if var.dims != common_dims:
++                        var = var.set_dims(common_dims, common_shape)
++                    vars.append(var)
++                else:
++                    if fill_value is dtypes.NA:
++                        dtype, value = dtypes.maybe_promote(template.dtype)
++                    else:
++                        value = fill_value
++                        dtype = dtypes.result_type(template.dtype, value)
++                    data = np.full(common_shape, value, dtype=dtype)
++                    vars.append(
++                        Variable(
++                            common_dims,
++                            data,
++                            attrs=template.attrs,
++                            encoding=template.encoding,
++                        )
++                    )
++
+             combined = concat_vars(vars, dim, positions)
+             assert isinstance(combined, Variable)
+             result_vars[k] = combined
+diff --git a/xarray/tests/test_concat.py b/xarray/tests/test_concat.py
+index c7af0fc..861cb4a 100644
+--- a/xarray/tests/test_concat.py
++++ b/xarray/tests/test_concat.py
+@@ -166,6 +166,51 @@ class TestConcatDataset:
+         )
+         assert_identical(expected, actual)
+ 
++    @pytest.mark.parametrize("data_vars", ["all", "minimal", "different"])
++    @pytest.mark.parametrize("fill_value", [dtypes.NA, -1])
++    def test_concat_missing_data_vars(self, data_vars, fill_value):
++        ds1 = Dataset({"a": ("x", [1])}, coords={"x": [0]})
++        ds2 = Dataset({"b": ("x", [2])}, coords={"x": [1]})
++
++        if fill_value is dtypes.NA:
++            fill_value = np.nan
++        expected = Dataset(
++            {"a": ("x", [1, fill_value]), "b": ("x", [fill_value, 2])},
++            coords={"x": [0, 1]},
++        )
++        actual = concat(
++            [ds1, ds2], dim="x", data_vars=data_vars, fill_value=fill_value
++        )
++        assert_identical(expected, actual)
++
++    def test_concat_different_missing_non_concat_data_vars(self):
++        ds1 = Dataset({"a": ("y", [1])})
++        ds2 = Dataset({"b": ("y", [2])})
++        expected = Dataset(
++            {
++                "a": (("t", "y"), [[1], [np.nan]]),
++                "b": (("t", "y"), [[np.nan], [2]]),
++            }
++        )
++
++        actual = concat([ds1, ds2], dim="t", data_vars="different")
++        assert_identical(expected, actual)
++
++    def test_concat_all_missing_non_concat_data_vars(self):
++        ds1 = Dataset({"a": ("y", [1]), "scalar_a": 1})
++        ds2 = Dataset({"b": ("y", [2]), "scalar_b": 2})
++        expected = Dataset(
++            {
++                "a": (("t", "y"), [[1], [np.nan]]),
++                "b": (("t", "y"), [[np.nan], [2]]),
++                "scalar_a": ("t", [1, np.nan]),
++                "scalar_b": ("t", [np.nan, 2]),
++            }
++        )
++
++        actual = concat([ds1, ds2], dim="t")
++        assert_identical(expected, actual)
++
+     def test_concat_errors(self):
+         data = create_test_data()
+         split_data = [data.isel(dim1=slice(3)), data.isel(dim1=slice(3, None))]
+@@ -193,7 +238,7 @@ class TestConcatDataset:
+         with raises_regex(ValueError, "present in some datasets"):
+             data0, data1 = deepcopy(split_data)
+             data1["foo"] = ("bar", np.random.randn(10))
+-            concat([data0, data1], "dim1")
++            concat([data0, data1], "dim1", data_vars="minimal")
+ 
+         with raises_regex(ValueError, "compat.* invalid"):
+             concat(split_data, "dim1", compat="foobar")

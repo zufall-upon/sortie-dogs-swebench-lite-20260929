@@ -1,0 +1,74 @@
+diff --git a/django/views/debug.py b/django/views/debug.py
+index cb3e8c7..86da47e 100644
+--- a/django/views/debug.py
++++ b/django/views/debug.py
+@@ -5,10 +5,10 @@ import types
+ from pathlib import Path
+ 
+ from django.conf import settings
+-from django.http import HttpResponse, HttpResponseNotFound
++from django.http import Http404, HttpResponse, HttpResponseNotFound
+ from django.template import Context, Engine, TemplateDoesNotExist
+ from django.template.defaultfilters import pprint
+-from django.urls import Resolver404, resolve
++from django.urls import resolve
+ from django.utils import timezone
+ from django.utils.datastructures import MultiValueDict
+ from django.utils.encoding import force_str
+@@ -483,7 +483,7 @@ def technical_404_response(request, exception):
+     caller = ''
+     try:
+         resolver_match = resolve(request.path)
+-    except Resolver404:
++    except Http404:
+         pass
+     else:
+         obj = resolver_match.func
+diff --git a/tests/urlpatterns/tests.py b/tests/urlpatterns/tests.py
+index 214739f..d9a4de8 100644
+--- a/tests/urlpatterns/tests.py
++++ b/tests/urlpatterns/tests.py
+@@ -1,7 +1,8 @@
+ import uuid
+ 
+ from django.core.exceptions import ImproperlyConfigured
+-from django.test import SimpleTestCase
++from django.http import Http404
++from django.test import Client, SimpleTestCase
+ from django.test.utils import override_settings
+ from django.urls import Resolver404, path, resolve, reverse
+ 
+@@ -219,6 +220,33 @@ class ConversionExceptionTests(SimpleTestCase):
+         with self.assertRaisesMessage(TypeError, 'This type error propagates.'):
+             resolve('/dynamic/abc/')
+ 
++    @override_settings(DEBUG=True)
++    def test_resolve_http404_displays_technical_404(self):
++        @DynamicConverter.register_to_python
++        def raises_http404(value):
++            raise Http404('This Http404 propagates.')
++        response = self.client.get('/dynamic/abc/')
++        self.assertEqual(response.status_code, 404)
++        self.assertContains(response, 'This Http404 propagates.', status_code=404)
++
++    @override_settings(DEBUG=True)
++    def test_resolve_http404_then_type_error_displays_technical_500(self):
++        resolve_calls = 0
++
++        @DynamicConverter.register_to_python
++        def raises_http404_then_type_error(value):
++            nonlocal resolve_calls
++            resolve_calls += 1
++            if resolve_calls == 1:
++                raise Http404('Initial converter 404.')
++            raise TypeError('This type error propagates.')
++
++        with self.assertLogs('django.request', 'ERROR'):
++            response = Client(raise_request_exception=False).get('/dynamic/abc/')
++        self.assertEqual(resolve_calls, 2)
++        self.assertEqual(response.status_code, 500)
++        self.assertContains(response, 'This type error propagates.', status_code=500)
++
+     def test_reverse_value_error_propagates(self):
+         @DynamicConverter.register_to_url
+         def raises_value_error(value):

@@ -1,0 +1,90 @@
+diff --git a/sympy/polys/factortools.py b/sympy/polys/factortools.py
+index 93298f4..2ff3594 100644
+--- a/sympy/polys/factortools.py
++++ b/sympy/polys/factortools.py
+@@ -124,21 +124,38 @@ def dmp_trial_division(f, factors, u, K):
+ 
+ 
+ def dup_zz_mignotte_bound(f, K):
+-    """Mignotte bound for univariate polynomials in `K[x]`. """
+-    a = dup_max_norm(f, K)
+-    b = abs(dup_LC(f, K))
++    """Knuth-Cohen bound for univariate polynomials in `K[x]`. """
++    norm_squared = sum((c*c for c in f), K.zero)
+     n = dup_degree(f)
++    scale = 2**n
++    scaled_norm_squared = scale**2 * norm_squared
++    a = K.sqrt(scaled_norm_squared)
+ 
+-    return K.sqrt(K(n + 1))*2**n*a*b
++    # Round the bound upward to keep it integral.
++    if a*a < scaled_norm_squared:
++        a += K.one
++
++    return a
+ 
+ 
+ def dmp_zz_mignotte_bound(f, u, K):
+-    """Mignotte bound for multivariate polynomials in `K[X]`. """
+-    a = dmp_max_norm(f, u, K)
+-    b = abs(dmp_ground_LC(f, u, K))
++    """Knuth-Cohen bound for multivariate polynomials in `K[X]`. """
++    def squared_norm(g, v):
++        if not v:
++            return sum((c*c for c in g), K.zero)
++        return sum((squared_norm(c, v - 1) for c in g), K.zero)
++
++    norm_squared = squared_norm(f, u)
+     n = sum(dmp_degree_list(f, u))
++    scale = 2**n
++    scaled_norm_squared = scale**2 * norm_squared
++    a = K.sqrt(scaled_norm_squared)
++
++    # Round the bound upward to keep it integral.
++    if a*a < scaled_norm_squared:
++        a += K.one
+ 
+-    return K.sqrt(K(n + 1))*2**n*a*b
++    return a
+ 
+ 
+ def dup_zz_hensel_step(m, f, g, h, s, t, K):
+diff --git a/sympy/polys/tests/test_factortools.py b/sympy/polys/tests/test_factortools.py
+index 7bcd935..99516b7 100644
+--- a/sympy/polys/tests/test_factortools.py
++++ b/sympy/polys/tests/test_factortools.py
+@@ -27,12 +27,14 @@ def test_dmp_trial_division():
+ 
+ def test_dup_zz_mignotte_bound():
+     R, x = ring("x", ZZ)
+-    assert R.dup_zz_mignotte_bound(2*x**2 + 3*x + 4) == 32
++    assert R.dup_zz_mignotte_bound(2*x**2 + 3*x + 4) == 22
++    assert R.dup_zz_mignotte_bound(3*x + 4) == 10
+ 
+ 
+ def test_dmp_zz_mignotte_bound():
+     R, x, y = ring("x,y", ZZ)
+-    assert R.dmp_zz_mignotte_bound(2*x**2 + 3*x + 4) == 32
++    assert R.dmp_zz_mignotte_bound(2*x**2 + 3*x + 4) == 22
++    assert R.dmp_zz_mignotte_bound(2*x*y + 3*x + 4*y + 5) == 30
+ 
+ 
+ def test_dup_zz_hensel_step():
+@@ -254,7 +256,7 @@ def test_dmp_zz_wang():
+     UV, _x = ring("x", ZZ)
+ 
+     p = ZZ(nextprime(R.dmp_zz_mignotte_bound(w_1)))
+-    assert p == 6291469
++    assert p == 1374697
+ 
+     t_1, k_1, e_1 = y, 1, ZZ(-14)
+     t_2, k_2, e_2 = z, 2, ZZ(3)
+@@ -300,7 +302,7 @@ def test_dmp_zz_wang_fail():
+     UV, _x = ring("x", ZZ)
+ 
+     p = ZZ(nextprime(R.dmp_zz_mignotte_bound(w_1)))
+-    assert p == 6291469
++    assert p == 1374697
+ 
+     H_1 = [44*x**2 + 42*x + 1, 126*x**2 - 9*x + 28, 187*x**2 - 23]
+     H_2 = [-4*x**2*y - 12*x**2 - 3*x*y + 1, -9*x**2*y - 9*x - 2*y, x**2*y**2 - 9*x**2 + y - 9]

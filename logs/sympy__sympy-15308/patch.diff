@@ -1,0 +1,30 @@
+diff --git a/sympy/printing/latex.py b/sympy/printing/latex.py
+index a0eb977..f5c4411 100644
+--- a/sympy/printing/latex.py
++++ b/sympy/printing/latex.py
+@@ -2189,6 +2189,7 @@ def _print_Tr(self, p):
+         #Todo: Handle indices
+         contents = self._print(p.args[0])
+         return r'\mbox{Tr}\left(%s\right)' % (contents)
++    _print_Trace = _print_Tr
+ 
+     def _print_totient(self, expr, exp=None):
+         if exp is not None:
+diff --git a/sympy/printing/tests/test_latex.py b/sympy/printing/tests/test_latex.py
+index 9f644f1..eb2ba68 100644
+--- a/sympy/printing/tests/test_latex.py
++++ b/sympy/printing/tests/test_latex.py
+@@ -1394,6 +1394,13 @@ def test_Tr():
+     t = Tr(A*B)
+     assert latex(t) == r'\mbox{Tr}\left(A B\right)'
+ 
++    from sympy import trace
++    A = MatrixSymbol('A', n, n)
++    B = MatrixSymbol('B', n, n)
++    assert latex(trace(A**2)) == r'\mbox{Tr}\left(A^{2}\right)'
++    assert latex(trace((A + B)**2)) == \
++        r'\mbox{Tr}\left(\left(A + B\right)^{2}\right)'
++
+ 
+ def test_Adjoint():
+     from sympy.matrices import MatrixSymbol, Adjoint, Inverse, Transpose

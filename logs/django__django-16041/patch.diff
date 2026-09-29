@@ -1,0 +1,39 @@
+diff --git a/django/forms/formsets.py b/django/forms/formsets.py
+index 5767642..4a6e0d6 100644
+--- a/django/forms/formsets.py
++++ b/django/forms/formsets.py
+@@ -257,12 +257,12 @@ class BaseFormSet(RenderableFormMixin):
+ 
+     @property
+     def empty_form(self):
++        form_kwargs = {**self.get_form_kwargs(None), "empty_permitted": True}
+         form = self.form(
+             auto_id=self.auto_id,
+             prefix=self.add_prefix("__prefix__"),
+-            empty_permitted=True,
+             use_required_attribute=False,
+-            **self.get_form_kwargs(None),
++            **form_kwargs,
+             renderer=self.renderer,
+         )
+         self.add_fields(form, None)
+diff --git a/tests/forms_tests/tests/test_formsets.py b/tests/forms_tests/tests/test_formsets.py
+index c36a79d..c53bff6 100644
+--- a/tests/forms_tests/tests/test_formsets.py
++++ b/tests/forms_tests/tests/test_formsets.py
+@@ -179,6 +179,15 @@ class FormsFormsetTestCase(SimpleTestCase):
+         self.assertTrue(hasattr(formset.empty_form, "custom_kwarg"))
+         self.assertEqual(formset.empty_form.custom_kwarg, 1)
+ 
++        RequiredFieldFormSet = formset_factory(FavoriteDrinkForm)
++        for empty_permitted in (True, False):
++            with self.subTest(empty_permitted=empty_permitted):
++                formset = RequiredFieldFormSet(
++                    form_kwargs={"empty_permitted": empty_permitted}
++                )
++                self.assertTrue(formset.empty_form.empty_permitted)
++                self.assertIn("name=", str(formset.empty_form))
++
+     def test_formset_validation(self):
+         # FormSet instances can also have an error attribute if validation failed for
+         # any of the forms.

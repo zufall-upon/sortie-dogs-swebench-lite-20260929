@@ -1,0 +1,63 @@
+diff --git a/django/forms/formsets.py b/django/forms/formsets.py
+index a89c355..1b0d455 100644
+--- a/django/forms/formsets.py
++++ b/django/forms/formsets.py
+@@ -333,7 +333,7 @@ class BaseFormSet:
+         self._non_form_errors.
+         """
+         self._errors = []
+-        self._non_form_errors = self.error_class()
++        self._non_form_errors = self.error_class(error_class='nonform')
+         empty_forms_count = 0
+ 
+         if not self.is_bound:  # Stop further processing.
+@@ -380,7 +380,7 @@ class BaseFormSet:
+             # Give self.clean() a chance to do cross-form validation.
+             self.clean()
+         except ValidationError as e:
+-            self._non_form_errors = self.error_class(e.error_list)
++            self._non_form_errors = self.error_class(e.error_list, error_class='nonform')
+ 
+     def clean(self):
+         """
+diff --git a/docs/topics/forms/formsets.txt b/docs/topics/forms/formsets.txt
+index 1f2c7c3..c85ac72 100644
+--- a/docs/topics/forms/formsets.txt
++++ b/docs/topics/forms/formsets.txt
+@@ -365,6 +365,16 @@ The formset ``clean`` method is called after all the ``Form.clean`` methods
+ have been called. The errors will be found using the ``non_form_errors()``
+ method on the formset.
+ 
++Formset-level errors returned by ``non_form_errors()`` have an additional CSS
++class of ``nonform`` to distinguish them from errors associated with individual
++forms. For example, ``{{ formset.non_form_errors }}`` renders as:
++
++.. code-block:: html
++
++    <ul class="errorlist nonform">
++        <li>Generic validation error</li>
++    </ul>
++
+ Validating the number of forms in a formset
+ ===========================================
+ 
+diff --git a/tests/forms_tests/tests/test_formsets.py b/tests/forms_tests/tests/test_formsets.py
+index 889560a..0fe8e95 100644
+--- a/tests/forms_tests/tests/test_formsets.py
++++ b/tests/forms_tests/tests/test_formsets.py
+@@ -1143,6 +1143,7 @@ class FormsFormsetTestCase(SimpleTestCase):
+         }
+         formset = ChoiceFormSet(data, auto_id=False, prefix='choices')
+         self.assertIsInstance(formset.non_form_errors(), ErrorList)
++        self.assertIn('<ul class="errorlist nonform">', formset.non_form_errors().as_ul())
+         self.assertEqual(list(formset.non_form_errors()), ['This is a non-form error'])
+ 
+     def test_validate_max_ignores_forms_marked_for_deletion(self):
+@@ -1303,6 +1304,7 @@ class TestIsBoundBehavior(SimpleTestCase):
+     def test_no_data_error(self):
+         formset = ArticleFormSet({})
+         self.assertIs(formset.is_valid(), False)
++        self.assertIn('<ul class="errorlist nonform">', formset.non_form_errors().as_ul())
+         self.assertEqual(
+             formset.non_form_errors(),
+             [

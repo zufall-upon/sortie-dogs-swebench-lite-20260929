@@ -1,0 +1,73 @@
+diff --git a/astropy/wcs/tests/test_wcs.py b/astropy/wcs/tests/test_wcs.py
+index 85853e1..69683c3 100644
+--- a/astropy/wcs/tests/test_wcs.py
++++ b/astropy/wcs/tests/test_wcs.py
+@@ -157,6 +157,15 @@ def test_pix2world():
+ 
+     assert np.all(np.abs(result - answer) < close_enough)
+ 
++    # Exercise empty coordinates through the celestial-axis ordering helpers.
++    empty_coordinates = np.empty((0, 2))
++    for transform in (ww.wcs_pix2world, ww.wcs_world2pix):
++        split = transform([], [], 0, ra_dec_order=True)
++        assert all(axis.shape == (0,) for axis in split)
++
++        matrix = transform(empty_coordinates, 0, ra_dec_order=True)
++        assert matrix.shape == (0, 2)
++
+ 
+ def test_load_fits_path():
+     fits_name = get_pkg_data_filename('data/sip.fits')
+@@ -248,6 +257,21 @@ def test_broadcasting():
+     assert yp.shape == (2, 3, 4)
+ 
+ 
++@pytest.mark.parametrize(
++    "transform", ["wcs_pix2world", "wcs_world2pix", "all_pix2world",
++                  "all_world2pix"])
++def test_empty_coordinate_arrays(transform):
++    w = wcs.WCS(naxis=2)
++    transform = getattr(w, transform)
++
++    axes = transform([], [], 0)
++    assert len(axes) == 2
++    assert all(axis.shape == (0,) for axis in axes)
++
++    coordinates = transform(np.empty((0, 2)), 0)
++    assert coordinates.shape == (0, 2)
++
++
+ def test_shape_mismatch():
+     w = wcs.WCS(naxis=2)
+ 
+diff --git a/astropy/wcs/wcs.py b/astropy/wcs/wcs.py
+index d3a06f2..e520920 100644
+--- a/astropy/wcs/wcs.py
++++ b/astropy/wcs/wcs.py
+@@ -1222,7 +1222,7 @@ reduce these to 2 dimensions using the naxis kwarg.
+ 
+             if ra_dec_order and sky == 'input':
+                 xy = self._denormalize_sky(xy)
+-            output = func(xy, origin)
++            output = _transform(xy, origin)
+             if ra_dec_order and sky == 'output':
+                 output = self._normalize_sky(output)
+                 return (output[:, 0].reshape(axes[0].shape),
+@@ -1237,11 +1237,16 @@ reduce these to 2 dimensions using the naxis kwarg.
+                     "of shape (N, {0})".format(self.naxis))
+             if ra_dec_order and sky == 'input':
+                 xy = self._denormalize_sky(xy)
+-            result = func(xy, origin)
++            result = _transform(xy, origin)
+             if ra_dec_order and sky == 'output':
+                 result = self._normalize_sky(result)
+             return result
+ 
++        def _transform(xy, origin):
++            if xy.size == 0:
++                return np.empty(xy.shape, dtype=float)
++            return func(xy, origin)
++
+         if len(args) == 2:
+             try:
+                 xy, origin = args

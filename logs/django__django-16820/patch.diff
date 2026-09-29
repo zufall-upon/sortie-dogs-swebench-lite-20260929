@@ -1,0 +1,149 @@
+diff --git a/django/db/migrations/operations/models.py b/django/db/migrations/operations/models.py
+index b89b6b5..1a6d13c 100644
+--- a/django/db/migrations/operations/models.py
++++ b/django/db/migrations/operations/models.py
+@@ -199,6 +199,37 @@ class CreateModel(ModelOperation):
+                     managers=self.managers,
+                 ),
+             ]
++        elif (
++            isinstance(operation, RenameIndex)
++            and self.name_lower == operation.model_name_lower
++            and operation.old_fields
++        ):
++            index_together = self.options.get("index_together", ())
++            old_fields = tuple(operation.old_fields)
++            if any(tuple(fields) == old_fields for fields in index_together):
++                options = self.options.copy()
++                remaining_index_together = {
++                    tuple(fields)
++                    for fields in index_together
++                    if tuple(fields) != old_fields
++                }
++                if remaining_index_together:
++                    options["index_together"] = remaining_index_together
++                else:
++                    options.pop("index_together", None)
++                options["indexes"] = [
++                    *options.get("indexes", []),
++                    models.Index(fields=operation.old_fields, name=operation.new_name),
++                ]
++                return [
++                    CreateModel(
++                        self.name,
++                        fields=self.fields,
++                        options=options,
++                        bases=self.bases,
++                        managers=self.managers,
++                    ),
++                ]
+         elif (
+             isinstance(operation, AlterOrderWithRespectTo)
+             and self.name_lower == operation.name_lower
+diff --git a/tests/migrations/test_optimizer.py b/tests/migrations/test_optimizer.py
+index 2f6616a..4c15252 100644
+--- a/tests/migrations/test_optimizer.py
++++ b/tests/migrations/test_optimizer.py
+@@ -1159,6 +1159,102 @@ class OptimizerTests(SimpleTestCase):
+             ]
+         )
+ 
++    def test_create_model_rename_index(self):
++        self.assertOptimizesTo(
++            [
++                migrations.CreateModel(
++                    "Book",
++                    fields=[
++                        ("author", models.IntegerField()),
++                        ("title", models.CharField(max_length=50)),
++                    ],
++                    options={
++                        "index_together": {
++                            ("author", "title"),
++                            ("title", "author"),
++                        },
++                        "indexes": [models.Index(fields=["title"], name="book_title_idx")],
++                    },
++                ),
++                migrations.RenameIndex(
++                    "Book",
++                    old_fields=("author", "title"),
++                    new_name="book_author_title_idx",
++                ),
++            ],
++            [
++                migrations.CreateModel(
++                    "Book",
++                    fields=[
++                        ("author", models.IntegerField()),
++                        ("title", models.CharField(max_length=50)),
++                    ],
++                    options={
++                        "index_together": {("title", "author")},
++                        "indexes": [
++                            models.Index(fields=["title"], name="book_title_idx"),
++                            models.Index(
++                                fields=("author", "title"),
++                                name="book_author_title_idx",
++                            ),
++                        ],
++                    },
++                )
++            ],
++        )
++        # Don't reduce an old_fields RenameIndex unless it renames an
++        # index_together index, as that is the index the operation removes.
++        self.assertDoesNotOptimize(
++            [
++                migrations.CreateModel(
++                    "Book",
++                    fields=[("title", models.CharField(max_length=50))],
++                ),
++                migrations.RenameIndex(
++                    "Book", old_fields=("title",), new_name="book_title_idx"
++                ),
++            ]
++        )
++        self.assertDoesNotOptimize(
++            [
++                migrations.CreateModel(
++                    "Book",
++                    fields=[("title", models.CharField(max_length=50))],
++                    options={"index_together": {("title",)}},
++                ),
++                migrations.RenameIndex(
++                    "Book", old_name="old_name", new_name="new_name"
++                ),
++            ]
++        )
++
++    def test_create_model_rename_index_removes_index_together(self):
++        optimized, _ = self.optimize(
++            [
++                migrations.CreateModel(
++                    "Book",
++                    fields=[
++                        ("author", models.IntegerField()),
++                        ("title", models.CharField(max_length=50)),
++                    ],
++                    options={"index_together": {("author", "title")}},
++                ),
++                migrations.RenameIndex(
++                    "Book",
++                    old_fields=("author", "title"),
++                    new_name="book_author_title_idx",
++                ),
++            ],
++            "books",
++        )
++        self.assertEqual(len(optimized), 1)
++        self.assertIsInstance(optimized[0], migrations.CreateModel)
++        self.assertNotIn("index_together", optimized[0].options)
++        self.assertEqual(
++            optimized[0].options["indexes"],
++            [models.Index(fields=["author", "title"], name="book_author_title_idx")],
++        )
++
+     def test_add_remove_index(self):
+         self.assertOptimizesTo(
+             [

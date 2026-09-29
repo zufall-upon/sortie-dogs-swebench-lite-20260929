@@ -1,0 +1,84 @@
+diff --git a/lib/matplotlib/tests/test_widgets.py b/lib/matplotlib/tests/test_widgets.py
+index 5706df4..58f2f33 100644
+--- a/lib/matplotlib/tests/test_widgets.py
++++ b/lib/matplotlib/tests/test_widgets.py
+@@ -1317,6 +1317,62 @@ def test_range_slider(orientation):
+     assert_allclose(handle_positions(slider), (0.1, 0.34))
+ 
+ 
++def test_range_slider_rebuild_on_changed():
++    fig = plt.figure()
++    current = {}
++    range_changes = []
++    button_clicks = []
++
++    def rebuild(*args):
++        plt.clf()
++        add_elements()
++        plt.draw()
++
++    def on_range_change(value):
++        range_changes.append(value)
++        rebuild()
++
++    def on_button_click(event):
++        button_clicks.append(event)
++        rebuild()
++
++    def add_elements():
++        range_ax = fig.add_axes([0.1, 0.6, 0.8, 0.15])
++        current['range'] = widgets.RangeSlider(
++            range_ax, 'Range', 0, 1, valinit=(0.25, 0.75))
++        current['range'].on_changed(on_range_change)
++        button_ax = fig.add_axes([0.1, 0.2, 0.8, 0.15])
++        current['button'] = widgets.Button(button_ax, 'Button', useblit=False)
++        current['button'].on_clicked(on_button_click)
++
++    def mouse_event(ax, name, xdata):
++        x, y = ax.transData.transform((xdata, 0.5))
++        event = MouseEvent(name, fig.canvas, x, y, button=1)
++        fig.canvas.callbacks.process(name, event)
++
++    add_elements()
++    fig.canvas.draw()
++
++    old_range_ax = current['range'].ax
++    mouse_event(old_range_ax, 'button_press_event', 0.5)
++    assert_allclose(range_changes, [(0.5, 0.75)])
++    assert current['range'].ax is not old_range_ax
++    assert fig.canvas.mouse_grabber is None
++
++    # Release the original press, then verify the replacement button works.
++    mouse_event(current['button'].ax, 'button_release_event', 0.5)
++    mouse_event(current['button'].ax, 'button_press_event', 0.5)
++    mouse_event(current['button'].ax, 'button_release_event', 0.5)
++    assert len(button_clicks) == 1
++
++    # The replacement range slider must also respond to a mouse press.
++    old_range_ax = current['range'].ax
++    mouse_event(old_range_ax, 'button_press_event', 0.9)
++    assert_allclose(range_changes[-1], (0.25, 0.9))
++    assert current['range'].ax is not old_range_ax
++    assert fig.canvas.mouse_grabber is None
++
++
+ @pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+ def test_range_slider_same_init_values(orientation):
+     if orientation == "vertical":
+diff --git a/lib/matplotlib/widgets.py b/lib/matplotlib/widgets.py
+index ebe5da4..f326464 100644
+--- a/lib/matplotlib/widgets.py
++++ b/lib/matplotlib/widgets.py
+@@ -905,6 +905,12 @@ class RangeSlider(SliderBase):
+         else:
+             self._update_val_from_pos(event.xdata)
+ 
++        if self.ax not in event.canvas.figure.axes:
++            self.drag_active = False
++            self._active_handle = None
++            if event.canvas.mouse_grabber == self.ax:
++                event.canvas.release_mouse(self.ax)
++
+     def _format(self, val):
+         """Pretty-print *val*."""
+         if self.valfmt is not None:

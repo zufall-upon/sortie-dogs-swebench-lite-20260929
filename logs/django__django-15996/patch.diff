@@ -1,0 +1,69 @@
+diff --git a/django/db/migrations/serializer.py b/django/db/migrations/serializer.py
+index 38da1e6..d4f4c0b 100644
+--- a/django/db/migrations/serializer.py
++++ b/django/db/migrations/serializer.py
+@@ -125,8 +125,33 @@ class EnumSerializer(BaseSerializer):
+     def serialize(self):
+         enum_class = self.value.__class__
+         module = enum_class.__module__
++        if self.value.name is None and isinstance(self.value, enum.Flag):
++            value = self.value.value
++            members = []
++            members_value = 0
++            for member in enum_class:
++                if (
++                    member.value
++                    and member.value & (member.value - 1) == 0
++                    and value & member.value == member.value
++                ):
++                    members.append(member)
++                    members_value |= member.value
++            if members and members_value == value:
++                name = " | ".join(
++                    "%s.%s[%r]" % (module, enum_class.__qualname__, member.name)
++                    for member in members
++                )
++            else:
++                name = "%s.%s(%r)" % (module, enum_class.__qualname__, value)
++        else:
++            name = "%s.%s[%r]" % (
++                module,
++                enum_class.__qualname__,
++                self.value.name,
++            )
+         return (
+-            "%s.%s[%r]" % (module, enum_class.__qualname__, self.value.name),
++            name,
+             {"import %s" % module},
+         )
+ 
+diff --git a/tests/migrations/test_writer.py b/tests/migrations/test_writer.py
+index bad8775..e2a945b 100644
+--- a/tests/migrations/test_writer.py
++++ b/tests/migrations/test_writer.py
+@@ -402,6 +402,25 @@ class WriterTests(SimpleTestCase):
+                 {"import migrations.test_writer"},
+             ),
+         )
++        self.assertSerializedResultEqual(
++            re.UNICODE | re.IGNORECASE,
++            (
++                "re.RegexFlag['IGNORECASE'] | re.RegexFlag['UNICODE']",
++                {"import re"},
++            ),
++        )
++        field = models.IntegerField(default=re.UNICODE | re.IGNORECASE)
++        self.assertSerializedResultEqual(
++            field,
++            (
++                "models.IntegerField(default=re.RegexFlag['IGNORECASE'] | "
++                "re.RegexFlag['UNICODE'])",
++                {"from django.db import models", "import re"},
++            ),
++        )
++        self.assertEqual(self.serialize_round_trip(field).default, field.default)
++        self.assertSerializedEqual(re.RegexFlag(0))
++        self.assertSerializedEqual(re.RegexFlag(1 << 15))
+         field = models.IntegerField(
+             default=IntFlagEnum.A, choices=[(m.value, m) for m in IntFlagEnum]
+         )

@@ -1,0 +1,70 @@
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 477aae2..7c8841b 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -310,6 +310,9 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+                     if ns == qualname and name not in members:
+                         members[name] = ObjectMember(name, INSTANCEATTR, class_=cls,
+                                                      docstring='\n'.join(docstring))
++                    elif (ns == qualname and members[name].object is INSTANCEATTR and
++                          members[name].class_ is cls):
++                        members[name].docstring = '\n'.join(docstring)
+             except (AttributeError, PycodeError):
+                 pass
+     except AttributeError:
+diff --git a/tests/roots/test-ext-autodoc/target/annotation_inheritance.py b/tests/roots/test-ext-autodoc/target/annotation_inheritance.py
+new file mode 100644
+index 0000000..39b7b02
+--- /dev/null
++++ b/tests/roots/test-ext-autodoc/target/annotation_inheritance.py
+@@ -0,0 +1,10 @@
++class Foo:
++    """docstring"""
++
++    attr1: int  #: docstring
++
++
++class Bar(Foo):
++    """docstring"""
++
++    attr2: str  #: docstring
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index 488b722..f5e477e 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -106,6 +106,35 @@ def test_inherited_instance_variable(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_inherited_annotation_only_attribute(app):
++    options = {'members': None,
++               'inherited-members': True}
++    actual = do_autodoc(app, 'class', 'target.annotation_inheritance.Bar', options)
++    assert list(actual) == [
++        '',
++        '.. py:class:: Bar()',
++        '   :module: target.annotation_inheritance',
++        '',
++        '   docstring',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr1',
++        '      :module: target.annotation_inheritance',
++        '      :type: int',
++        '',
++        '      docstring',
++        '',
++        '',
++        '   .. py:attribute:: Bar.attr2',
++        '      :module: target.annotation_inheritance',
++        '      :type: str',
++        '',
++        '      docstring',
++        '',
++    ]
++
++
+ def test_decorators(app):
+     actual = do_autodoc(app, 'class', 'target.decorator.Baz')
+     assert list(actual) == [

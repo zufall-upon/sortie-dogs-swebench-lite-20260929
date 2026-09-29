@@ -1,0 +1,129 @@
+diff --git a/django/forms/boundfield.py b/django/forms/boundfield.py
+index 9f2ae59..fbe10bf 100644
+--- a/django/forms/boundfield.py
++++ b/django/forms/boundfield.py
+@@ -96,9 +96,19 @@ class BoundField:
+             attrs.setdefault(
+                 "id", self.html_initial_id if only_initial else self.auto_id
+             )
++        value = self.value()
++        if only_initial and self.form.is_bound:
++            # Preserve the original hidden value when redisplaying a bound
++            # form; the submitted field value may have changed.
++            initial_value = self.form._widget_data_value(
++                widget,
++                self.html_initial_name,
++            )
++            if initial_value is not None:
++                value = initial_value
+         return widget.render(
+             name=self.html_initial_name if only_initial else self.html_name,
+-            value=self.value(),
++            value=value,
+             attrs=attrs,
+             renderer=self.form.renderer,
+         )
+diff --git a/tests/model_formsets/tests.py b/tests/model_formsets/tests.py
+index 598dc57..29de09b 100644
+--- a/tests/model_formsets/tests.py
++++ b/tests/model_formsets/tests.py
+@@ -4,7 +4,8 @@ from datetime import date
+ from decimal import Decimal
+ 
+ from django import forms
+-from django.core.exceptions import ImproperlyConfigured
++from django.contrib.postgres.fields import ArrayField
++from django.core.exceptions import ImproperlyConfigured, ValidationError
+ from django.db import models
+ from django.forms.formsets import formset_factory
+ from django.forms.models import (
+@@ -1604,6 +1605,8 @@ class ModelFormsetTest(TestCase):
+         }
+         formset = FormSet(data, instance=person)
+         self.assertTrue(formset.is_valid())
++        self.assertFalse(formset.forms[0].has_changed())
++        self.assertEqual(formset.save(commit=False), [])
+ 
+         # now test for when the data changes
+ 
+@@ -1652,6 +1655,80 @@ class ModelFormsetTest(TestCase):
+         formset = FormSet(data, instance=person)
+         self.assertTrue(formset.is_valid())
+ 
++    def test_callable_default_unchanged_resubmission(self):
++        class CallableDefaultInline(models.Model):
++            author = models.ForeignKey(Author, models.CASCADE)
++            plop = ArrayField(models.CharField(max_length=42), default=list)
++
++            class Meta:
++                app_label = "model_formsets"
++
++        class CallableDefaultInlineForm(forms.ModelForm):
++            raise_validation_error = True
++
++            class Meta:
++                model = CallableDefaultInline
++                fields = ("plop",)
++
++            def clean(self):
++                if self.raise_validation_error:
++                    raise ValidationError("whatever")
++
++        FormSet = inlineformset_factory(
++            Author, CallableDefaultInline, form=CallableDefaultInlineForm, extra=1
++        )
++        prefix = FormSet.get_default_prefix()
++
++        def get_data(initial_value):
++            return {
++                "%s-TOTAL_FORMS" % prefix: "1",
++                "%s-INITIAL_FORMS" % prefix: "0",
++                "%s-MAX_NUM_FORMS" % prefix: "",
++                "%s-0-plop" % prefix: "test",
++                "initial-%s-0-plop" % prefix: initial_value,
++            }
++
++        def get_hidden_initial_value(form):
++            bound_field = form["plop"]
++            rendered_field = str(bound_field)
++            hidden_field = str(bound_field.as_hidden(only_initial=True))
++            self.assertTrue(rendered_field.endswith(hidden_field))
++            match = re.search(r'\bvalue="([^"]*)"', hidden_field)
++            return match.group(1) if match else ""
++
++        initial_formset = FormSet(instance=Author())
++        initial_value = get_hidden_initial_value(initial_formset.forms[0])
++        self.assertEqual(initial_value, "")
++        formset = FormSet(get_data(initial_value), instance=Author())
++
++        form = formset.forms[0]
++        self.assertTrue(form.has_changed())
++        self.assertFalse(formset.is_valid())
++        self.assertEqual(form.errors, {"__all__": ["whatever"]})
++        self.assertEqual(formset.errors, [{"__all__": ["whatever"]}])
++        self.assertTrue(form.empty_permitted)
++        rendered_initial_value = get_hidden_initial_value(form)
++        self.assertEqual(rendered_initial_value, "")
++
++        # Resubmitting the data from the invalid render still validates the
++        # unchanged array value rather than treating the extra form as empty.
++        formset = FormSet(get_data(rendered_initial_value), instance=Author())
++        form = formset.forms[0]
++        self.assertTrue(form.has_changed())
++        self.assertFalse(formset.is_valid())
++        self.assertEqual(form.errors, {"__all__": ["whatever"]})
++        self.assertEqual(formset.errors, [{"__all__": ["whatever"]}])
++
++        # Once valid, the submitted inline must remain eligible for saving.
++        CallableDefaultInlineForm.raise_validation_error = False
++        formset = FormSet(
++            get_data(get_hidden_initial_value(form)), instance=Author()
++        )
++        self.assertTrue(formset.is_valid())
++        self.assertTrue(formset.forms[0].has_changed())
++        saved = formset.save(commit=False)
++        self.assertEqual([obj.plop for obj in saved], [["test"]])
++
+     def test_inlineformset_factory_with_null_fk(self):
+         # inlineformset_factory tests with fk having null=True. see #9462.
+         # create some data that will exhibit the issue

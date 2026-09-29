@@ -1,0 +1,45 @@
+diff --git a/sklearn/svm/base.py b/sklearn/svm/base.py
+index 64cebe8..c334a8f 100644
+--- a/sklearn/svm/base.py
++++ b/sklearn/svm/base.py
+@@ -287,8 +287,7 @@ class BaseLibSVM(BaseEstimator, metaclass=ABCMeta):
+         n_SV = self.support_vectors_.shape[0]
+ 
+         dual_coef_indices = np.tile(np.arange(n_SV), n_class)
+-        dual_coef_indptr = np.arange(0, dual_coef_indices.size + 1,
+-                                     dual_coef_indices.size / n_class)
++        dual_coef_indptr = np.arange(n_class + 1) * n_SV
+         self.dual_coef_ = sp.csr_matrix(
+             (dual_coef_data, dual_coef_indices, dual_coef_indptr),
+             (n_class, n_SV))
+diff --git a/sklearn/svm/tests/test_sparse.py b/sklearn/svm/tests/test_sparse.py
+index 7cf6e8a..298fada 100644
+--- a/sklearn/svm/tests/test_sparse.py
++++ b/sklearn/svm/tests/test_sparse.py
+@@ -93,6 +93,26 @@ def test_svc():
+             check_svm_model_equal(clf, sp_clf, *dataset)
+ 
+ 
++def test_sparse_svr_empty_support():
++    X_train = np.array([[0, 1, 0, 0], [0, 0, 0, 1],
++                        [0, 0, 1, 0], [0, 0, 0, 1]])
++    y_train = np.array([0.04, 0.04, 0.10, 0.16])
++    reg = svm.SVR(C=316.227766017, cache_size=200, coef0=0.0, degree=3,
++                  epsilon=0.1, gamma=1.0, kernel='linear', max_iter=15000,
++                  shrinking=True, tol=0.001, verbose=False)
++
++    reg.fit(X_train, y_train)
++    assert reg.support_.shape == (0,)
++    assert reg.dual_coef_.shape == (1, 0)
++    dense_predictions = reg.predict(X_train)
++
++    reg.fit(sparse.csr_matrix(X_train), y_train)
++    assert sparse.isspmatrix_csr(reg.dual_coef_)
++    assert reg.dual_coef_.shape == (1, 0)
++    assert_array_almost_equal(
++        reg.predict(sparse.csr_matrix(X_train)), dense_predictions)
++
++
+ def test_unsorted_indices():
+     # test that the result with sorted and unsorted indices in csr is the same
+     # we use a subset of digits as iris, blobs or make_classification didn't

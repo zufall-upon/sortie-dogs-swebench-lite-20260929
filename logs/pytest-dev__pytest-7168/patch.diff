@@ -1,0 +1,47 @@
+diff --git a/src/_pytest/_io/saferepr.py b/src/_pytest/_io/saferepr.py
+index 23af4d0..47a00de 100644
+--- a/src/_pytest/_io/saferepr.py
++++ b/src/_pytest/_io/saferepr.py
+@@ -20,7 +20,7 @@ def _format_repr_exception(exc: BaseException, obj: Any) -> str:
+     except BaseException as exc:
+         exc_info = "unpresentable exception ({})".format(_try_repr_or_str(exc))
+     return "<[{} raised in repr()] {} object at 0x{:x}>".format(
+-        exc_info, obj.__class__.__name__, id(obj)
++        exc_info, type(obj).__name__, id(obj)
+     )
+ 
+ 
+diff --git a/testing/io/test_saferepr.py b/testing/io/test_saferepr.py
+index 0608420..89dd4c9 100644
+--- a/testing/io/test_saferepr.py
++++ b/testing/io/test_saferepr.py
+@@ -1,5 +1,6 @@
+ import pytest
+ from _pytest._io.saferepr import _pformat_dispatch
++from _pytest._io.saferepr import safeformat
+ from _pytest._io.saferepr import saferepr
+ 
+ 
+@@ -56,6 +57,22 @@ def test_exceptions():
+     )
+ 
+ 
++@pytest.mark.parametrize("formatter", [saferepr, safeformat])
++def test_exceptions_with_broken_getattribute(formatter):
++    class SomeClass:
++        def __getattribute__(self, name):
++            raise
++
++        def __repr__(self):
++            raise
++
++    obj = SomeClass()
++    assert formatter(obj) == (
++        "<[RuntimeError('No active exception to reraise') raised in repr()] "
++        "SomeClass object at 0x{:x}>".format(id(obj))
++    )
++
++
+ def test_baseexception():
+     """Test saferepr() with BaseExceptions, which includes pytest outcomes."""
+ 

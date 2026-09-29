@@ -1,0 +1,102 @@
+diff --git a/sklearn/compose/_column_transformer.py b/sklearn/compose/_column_transformer.py
+index a261451..51e2b19 100644
+--- a/sklearn/compose/_column_transformer.py
++++ b/sklearn/compose/_column_transformer.py
+@@ -381,6 +381,9 @@ class ColumnTransformer(TransformerMixin, _BaseComposition):
+         output_config = _get_output_config("transform", self)
+         for name, trans, columns in transformers:
+             if replace_strings:
++                if _is_empty_column_selection(columns):
++                    continue
++
+                 # replace 'passthrough' with identity transformer and
+                 # skip in case of 'drop'
+                 if trans == "passthrough":
+@@ -391,8 +394,6 @@ class ColumnTransformer(TransformerMixin, _BaseComposition):
+                     ).set_output(transform=output_config["dense"])
+                 elif trans == "drop":
+                     continue
+-                elif _is_empty_column_selection(columns):
+-                    continue
+ 
+             if column_as_strings:
+                 # Convert all columns to using their string labels
+@@ -587,6 +588,8 @@ class ColumnTransformer(TransformerMixin, _BaseComposition):
+         for name, old, column, _ in self._iter():
+             if old == "drop":
+                 trans = "drop"
++            elif _is_empty_column_selection(column):
++                trans = old
+             elif old == "passthrough":
+                 # FunctionTransformer is present in list of transformers,
+                 # so get next transformer, but save original string
+@@ -596,8 +599,6 @@ class ColumnTransformer(TransformerMixin, _BaseComposition):
+                 # The fitted FunctionTransformer is saved in another attribute,
+                 # so it can be used during transform for set_output.
+                 self._name_to_fitted_passthrough[name] = func_transformer
+-            elif _is_empty_column_selection(column):
+-                trans = old
+             else:
+                 trans = next(fitted_transformers)
+             transformers_.append((name, trans, column))
+diff --git a/sklearn/compose/tests/test_column_transformer.py b/sklearn/compose/tests/test_column_transformer.py
+index e18a051..a14c3cc 100644
+--- a/sklearn/compose/tests/test_column_transformer.py
++++ b/sklearn/compose/tests/test_column_transformer.py
+@@ -21,7 +21,14 @@ from sklearn.compose import (
+ )
+ from sklearn.exceptions import NotFittedError
+ from sklearn.preprocessing import FunctionTransformer
+-from sklearn.preprocessing import StandardScaler, Normalizer, OneHotEncoder
++from sklearn.preprocessing import (
++    StandardScaler,
++    Normalizer,
++    OneHotEncoder,
++    RobustScaler,
++)
++from sklearn.impute import SimpleImputer
++from sklearn.pipeline import Pipeline
+ 
+ 
+ class Trans(TransformerMixin, BaseEstimator):
+@@ -1966,6 +1973,40 @@ def test_column_transformer_set_output(verbose_feature_names_out, remainder):
+     assert_array_equal(X_trans.index, df_test.index)
+ 
+ 
++@pytest.mark.parametrize("fit_transform", [True, False])
++def test_column_transformer_set_output_empty_selection(fit_transform):
++    pd = pytest.importorskip("pandas")
++    df = pd.DataFrame(
++        [[1.0, 2.0, 3.0, 4.0], [4, 2, 2, 5]], columns=["a", "b", "c", "d"]
++    )
++    ct = ColumnTransformer(
++        [
++            ("categorical", "passthrough", []),
++            (
++                "numerical",
++                Pipeline(
++                    [
++                        ("scaler", RobustScaler()),
++                        ("imputer", SimpleImputer(strategy="median")),
++                    ]
++                ),
++                ["a", "b", "c"],
++            ),
++        ],
++        remainder="drop",
++    ).set_output(transform="pandas")
++
++    if fit_transform:
++        X_trans = ct.fit_transform(df)
++    else:
++        X_trans = ct.fit(df).transform(df)
++
++    assert isinstance(X_trans, pd.DataFrame)
++    assert_array_equal(X_trans.columns, ct.get_feature_names_out())
++    assert_array_equal(X_trans.index, df.index)
++    assert ct.output_indices_["categorical"] == slice(0, 0)
++
++
+ @pytest.mark.parametrize("remainder", ["drop", "passthrough"])
+ @pytest.mark.parametrize("fit_transform", [True, False])
+ def test_column_transform_set_output_mixed(remainder, fit_transform):

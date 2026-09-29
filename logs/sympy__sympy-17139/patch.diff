@@ -1,0 +1,64 @@
+diff --git a/sympy/simplify/fu.py b/sympy/simplify/fu.py
+index ad1130e..5c29bb3 100644
+--- a/sympy/simplify/fu.py
++++ b/sympy/simplify/fu.py
+@@ -501,6 +501,10 @@ def _f(rv):
+         if not (rv.is_Pow and rv.base.func == f):
+             return rv
+ 
++        # Comparing a non-real exponent with an integer raises TypeError.
++        if rv.exp.is_real is False:
++            return rv
++
+         if (rv.exp < 0) == True:
+             return rv
+         if (rv.exp > max) == True:
+@@ -515,6 +519,11 @@ def _f(rv):
+                     return rv
+                 e = rv.exp//2
+             else:
++                # perfect_power only accepts positive integers.
++                if (rv.exp.is_integer is not True or
++                        rv.exp.is_number is not True or
++                        rv.exp.is_positive is not True):
++                    return rv
+                 p = perfect_power(rv.exp)
+                 if not p:
+                     return rv
+diff --git a/sympy/simplify/tests/test_fu.py b/sympy/simplify/tests/test_fu.py
+index 54be6e1..2c23686 100644
+--- a/sympy/simplify/tests/test_fu.py
++++ b/sympy/simplify/tests/test_fu.py
+@@ -1,5 +1,5 @@
+ from sympy import (
+-    Add, Mul, S, Symbol, cos, cot, pi, I, sin, sqrt, tan, root, csc, sec,
++    Add, Mul, Pow, S, Symbol, cos, cot, pi, I, sin, sqrt, tan, root, csc, sec,
+     powsimp, symbols, sinh, cosh, tanh, coth, sech, csch, Dummy)
+ from sympy.simplify.fu import (
+     L, TR1, TR10, TR10i, TR11, TR12, TR12i, TR13, TR14, TR15, TR16,
+@@ -75,6 +75,13 @@ def test__TR56():
+     assert T(sin(x)**6, sin, cos, h, 6, False) == (-cos(x)**2 + 1)**3
+     assert T(sin(x)**6, sin, cos, h, 6, True) == sin(x)**6
+     assert T(sin(x)**8, sin, cos, h, 10, True) == (-cos(x)**2 + 1)**4
++    assert T(cos(x)**I, cos, sin, h, 10, False) == cos(x)**I
++    n = Symbol('n', integer=True)
++    assert T(sin(x)**(2*n), sin, cos, h, 10, False) == (-cos(x)**2 + 1)**n
++    assert T(sin(x)**(S(3)/2), sin, cos, h, 10, True) == sin(x)**(S(3)/2)
++    assert T(sin(x)**n, sin, cos, h, 10, True) == sin(x)**n
++    zero_power = Pow(sin(x), S.Zero, evaluate=False)
++    assert T(zero_power, sin, cos, h, 10, True) == zero_power
+ 
+ 
+ def test_TR5():
+diff --git a/sympy/simplify/tests/test_simplify.py b/sympy/simplify/tests/test_simplify.py
+index 27fc527..b0f333e 100644
+--- a/sympy/simplify/tests/test_simplify.py
++++ b/sympy/simplify/tests/test_simplify.py
+@@ -139,6 +139,7 @@ def test_issue_3557():
+ 
+ def test_simplify_other():
+     assert simplify(sin(x)**2 + cos(x)**2) == 1
++    assert simplify(cos(x)**I) == cos(x)**I
+     assert simplify(gamma(x + 1)/gamma(x)) == x
+     assert simplify(sin(x)**2 + cos(x)**2 + factorial(x)/gamma(x)) == 1 + x
+     assert simplify(

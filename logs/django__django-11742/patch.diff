@@ -1,0 +1,230 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index 9ce46e3..86951ad 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -258,29 +258,47 @@ class Field(RegisterLookupMixin):
+             ]
+ 
+         # Expect [group_name, [value, display]]
++        choice_values = []
+         for choices_group in self.choices:
+             try:
+                 group_name, group_choices = choices_group
+             except (TypeError, ValueError):
+                 # Containing non-pairs
+                 break
+-            try:
+-                if not all(
+-                    is_value(value) and is_value(human_name)
+-                    for value, human_name in group_choices
+-                ):
+-                    break
+-            except (TypeError, ValueError):
+-                # No groups, choices in the form [value, display]
++            if is_value(group_choices):
++                # No groups, choices in the form [value, display]. In
++                # particular, an empty string is a valid display value, not an
++                # empty group.
+                 value, human_name = group_name, group_choices
+                 if not is_value(value) or not is_value(human_name):
+                     break
++                choice_values.append(value)
++            else:
++                try:
++                    group_values = []
++                    for value, human_name in group_choices:
++                        if not is_value(value) or not is_value(human_name):
++                            break
++                        group_values.append(value)
++                    else:
++                        choice_values.extend(group_values)
++                        # Special case: choices=['ab']
++                        if isinstance(choices_group, str):
++                            break
++                        continue
++                    break
++                except (TypeError, ValueError):
++                    # No groups, choices in the form [value, display]
++                    value, human_name = group_name, group_choices
++                    if not is_value(value) or not is_value(human_name):
++                        break
++                    choice_values.append(value)
+ 
+             # Special case: choices=['ab']
+             if isinstance(choices_group, str):
+                 break
+         else:
+-            return []
++            return self._check_choices_max_length(choice_values)
+ 
+         return [
+             checks.Error(
+@@ -291,6 +309,38 @@ class Field(RegisterLookupMixin):
+             )
+         ]
+ 
++    def _check_choices_max_length(self, choice_values):
++        if (self.max_length is None or not isinstance(self.max_length, int) or
++                isinstance(self.max_length, bool) or self.max_length <= 0):
++            return []
++
++        longest_value = 0
++        for value in choice_values:
++            if (isinstance(value, Promise) and
++                    getattr(value, '_delegate_text', False)):
++                value_length = len(value)
++            elif isinstance(value, str):
++                value_length = len(value)
++            elif isinstance(self, CharField):
++                value = self.to_python(value)
++                if not isinstance(value, str):
++                    continue
++                value_length = len(value)
++            else:
++                continue
++            longest_value = max(longest_value, value_length)
++
++        if self.max_length < longest_value:
++            return [
++                checks.Error(
++                    "'max_length' is too small to fit the longest value "
++                    "in 'choices' (%d characters)." % longest_value,
++                    obj=self,
++                    id='fields.E009',
++                )
++            ]
++        return []
++
+     def _check_db_index(self):
+         if self.db_index not in (None, True, False):
+             return [
+diff --git a/tests/invalid_models_tests/test_ordinary_fields.py b/tests/invalid_models_tests/test_ordinary_fields.py
+index 5bb1847..c18706a 100644
+--- a/tests/invalid_models_tests/test_ordinary_fields.py
++++ b/tests/invalid_models_tests/test_ordinary_fields.py
+@@ -98,9 +98,88 @@ class CharFieldTests(SimpleTestCase):
+         field = Model._meta.get_field('field')
+         self.assertEqual(field.check(), [])
+ 
++    def test_choices_max_length(self):
++        class Model(models.Model):
++            field = models.CharField(max_length=2, choices=[('long', 'Long')])
++            grouped_field = models.CharField(
++                max_length=2,
++                choices=[('Group', [('long', 'Long')])],
++            )
++            iterator_grouped_field = models.CharField(
++                max_length=2,
++                choices=[('Group', iter([('long', 'Long')]))],
++            )
++
++        for field_name in ('field', 'grouped_field', 'iterator_grouped_field'):
++            field = Model._meta.get_field(field_name)
++            with self.subTest(field_name):
++                self.assertEqual(field.check(), [
++                    Error(
++                        "'max_length' is too small to fit the longest value "
++                        "in 'choices' (4 characters).",
++                        obj=field,
++                        id='fields.E009',
++                    ),
++                ])
++
++    def test_choices_max_length_empty_label(self):
++        class Model(models.Model):
++            field = models.CharField(max_length=2, choices=[('long', '')])
++
++        field = Model._meta.get_field('field')
++        self.assertEqual(field.check(), [
++            Error(
++                "'max_length' is too small to fit the longest value "
++                "in 'choices' (4 characters).",
++                obj=field,
++                id='fields.E009',
++            ),
++        ])
++
++    def test_choices_max_length_numeric_value(self):
++        class Model(models.Model):
++            field = models.CharField(max_length=1, choices=[(123, 'Number')])
++
++        field = Model._meta.get_field('field')
++        self.assertEqual(field.check(), [
++            Error(
++                "'max_length' is too small to fit the longest value "
++                "in 'choices' (3 characters).",
++                obj=field,
++                id='fields.E009',
++            ),
++        ])
++
++    def test_choices_max_length_lazy_value(self):
++        class Model(models.Model):
++            field = models.CharField(max_length=2, choices=[[_('long'), 'Long']])
++            numeric_field = models.CharField(
++                max_length=1,
++                choices=[[lazy(lambda: 123, int)(), 'Number']],
++            )
++
++        field = Model._meta.get_field('field')
++        self.assertEqual(field.check(), [
++            Error(
++                "'max_length' is too small to fit the longest value "
++                "in 'choices' (4 characters).",
++                obj=field,
++                id='fields.E009',
++            ),
++        ])
++        numeric_field = Model._meta.get_field('numeric_field')
++        self.assertEqual(numeric_field.check(), [
++            Error(
++                "'max_length' is too small to fit the longest value "
++                "in 'choices' (3 characters).",
++                obj=numeric_field,
++                id='fields.E009',
++            ),
++        ])
++
+     def test_missing_max_length(self):
+         class Model(models.Model):
+-            field = models.CharField()
++            field = models.CharField(choices=[('long', 'Long')])
+ 
+         field = Model._meta.get_field('field')
+         self.assertEqual(field.check(), [
+@@ -113,7 +192,7 @@ class CharFieldTests(SimpleTestCase):
+ 
+     def test_negative_max_length(self):
+         class Model(models.Model):
+-            field = models.CharField(max_length=-1)
++            field = models.CharField(max_length=-1, choices=[('long', 'Long')])
+ 
+         field = Model._meta.get_field('field')
+         self.assertEqual(field.check(), [
+@@ -126,7 +205,7 @@ class CharFieldTests(SimpleTestCase):
+ 
+     def test_bad_max_length_value(self):
+         class Model(models.Model):
+-            field = models.CharField(max_length="bad")
++            field = models.CharField(max_length="bad", choices=[('long', 'Long')])
+ 
+         field = Model._meta.get_field('field')
+         self.assertEqual(field.check(), [
+@@ -139,7 +218,7 @@ class CharFieldTests(SimpleTestCase):
+ 
+     def test_str_max_length_value(self):
+         class Model(models.Model):
+-            field = models.CharField(max_length='20')
++            field = models.CharField(max_length='20', choices=[('long', 'Long')])
+ 
+         field = Model._meta.get_field('field')
+         self.assertEqual(field.check(), [
+@@ -152,7 +231,7 @@ class CharFieldTests(SimpleTestCase):
+ 
+     def test_str_max_length_type(self):
+         class Model(models.Model):
+-            field = models.CharField(max_length=True)
++            field = models.CharField(max_length=True, choices=[('long', 'Long')])
+ 
+         field = Model._meta.get_field('field')
+         self.assertEqual(field.check(), [

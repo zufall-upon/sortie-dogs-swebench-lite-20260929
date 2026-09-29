@@ -1,0 +1,47 @@
+diff --git a/django/contrib/auth/migrations/0011_update_proxy_permissions.py b/django/contrib/auth/migrations/0011_update_proxy_permissions.py
+index 0e66649..5cb6c96 100644
+--- a/django/contrib/auth/migrations/0011_update_proxy_permissions.py
++++ b/django/contrib/auth/migrations/0011_update_proxy_permissions.py
+@@ -24,9 +24,16 @@ def update_proxy_model_permissions(apps, schema_editor, reverse=False):
+         proxy_content_type = ContentType.objects.get_for_model(Model, for_concrete_model=False)
+         old_content_type = proxy_content_type if reverse else concrete_content_type
+         new_content_type = concrete_content_type if reverse else proxy_content_type
++        existing_permission_codenames = list(
++            Permission.objects.filter(
++                content_type=new_content_type,
++            ).values_list('codename', flat=True)
++        )
+         Permission.objects.filter(
+             permissions_query,
+             content_type=old_content_type,
++        ).exclude(
++            codename__in=existing_permission_codenames,
+         ).update(content_type=new_content_type)
+ 
+ 
+diff --git a/tests/auth_tests/test_migrations.py b/tests/auth_tests/test_migrations.py
+index 5ff2f6b..9c22c71 100644
+--- a/tests/auth_tests/test_migrations.py
++++ b/tests/auth_tests/test_migrations.py
+@@ -120,6 +120,21 @@ class ProxyModelWithSameAppLabelTests(TestCase):
+         self.assertEqual(self.default_permission.content_type, proxy_model_content_type)
+         self.assertEqual(self.custom_permission.content_type, proxy_model_content_type)
+ 
++    def test_existing_proxy_permissions(self):
++        proxy_model_content_type = ContentType.objects.get_for_model(Proxy, for_concrete_model=False)
++        existing_permission = Permission.objects.create(
++            content_type=proxy_model_content_type,
++            codename='add_proxy',
++            name='Can add proxy',
++        )
++        update_proxy_permissions.update_proxy_model_permissions(apps, None)
++        self.default_permission.refresh_from_db()
++        self.custom_permission.refresh_from_db()
++        existing_permission.refresh_from_db()
++        self.assertEqual(self.default_permission.content_type, self.concrete_content_type)
++        self.assertEqual(self.custom_permission.content_type, proxy_model_content_type)
++        self.assertEqual(existing_permission.content_type, proxy_model_content_type)
++
+     def test_user_still_has_proxy_model_permissions(self):
+         user = User.objects.create()
+         user.user_permissions.add(self.default_permission)

@@ -1,0 +1,34 @@
+diff --git a/django/views/static.py b/django/views/static.py
+index 1c558a5..4214b06 100644
+--- a/django/views/static.py
++++ b/django/views/static.py
+@@ -129,6 +129,8 @@ def was_modified_since(header=None, mtime=0, size=0):
+         if header is None:
+             raise ValueError
+         matches = re.match(r"^([^;]+)(; length=([0-9]+))?$", header, re.IGNORECASE)
++        if matches is None:
++            raise ValueError
+         header_mtime = parse_http_date(matches[1])
+         header_len = matches[3]
+         if header_len and int(header_len) != size:
+diff --git a/tests/view_tests/tests/test_static.py b/tests/view_tests/tests/test_static.py
+index 5ec054b..bc8c6c1 100644
+--- a/tests/view_tests/tests/test_static.py
++++ b/tests/view_tests/tests/test_static.py
+@@ -79,6 +79,16 @@ class StaticTests(SimpleTestCase):
+         )
+         self.assertIsInstance(response, HttpResponseNotModified)
+ 
++    def test_empty_if_modified_since(self):
++        file_name = "file.txt"
++        response = self.client.get(
++            "/%s/%s" % (self.prefix, file_name), HTTP_IF_MODIFIED_SINCE=""
++        )
++        response_content = b"".join(response)
++        with open(path.join(media_dir, file_name), "rb") as fp:
++            self.assertEqual(fp.read(), response_content)
++        self.assertEqual(len(response_content), int(response.headers["Content-Length"]))
++
+     def test_invalid_if_modified_since(self):
+         """Handle bogus If-Modified-Since values gracefully
+ 

@@ -1,0 +1,25 @@
+diff --git a/sympy/matrices/expressions/blockmatrix.py b/sympy/matrices/expressions/blockmatrix.py
+index 11aebbc..b821c42 100644
+--- a/sympy/matrices/expressions/blockmatrix.py
++++ b/sympy/matrices/expressions/blockmatrix.py
+@@ -301,7 +301,7 @@ def blocks(self):
+         data = [[mats[i] if i == j else ZeroMatrix(mats[i].rows, mats[j].cols)
+                         for j in range(len(mats))]
+                         for i in range(len(mats))]
+-        return ImmutableDenseMatrix(data)
++        return ImmutableDenseMatrix(data, evaluate=False)
+ 
+     @property
+     def shape(self):
+diff --git a/sympy/matrices/expressions/tests/test_blockmatrix.py b/sympy/matrices/expressions/tests/test_blockmatrix.py
+index 9d77873..c049def 100644
+--- a/sympy/matrices/expressions/tests/test_blockmatrix.py
++++ b/sympy/matrices/expressions/tests/test_blockmatrix.py
+@@ -99,6 +99,7 @@ def test_BlockMatrix():
+ def test_block_collapse_explicit_matrices():
+     A = Matrix([[1, 2], [3, 4]])
+     assert block_collapse(BlockMatrix([[A]])) == A
++    assert Matrix(BlockDiagMatrix(A)) == A
+ 
+     A = ImmutableSparseMatrix([[1, 2], [3, 4]])
+     assert block_collapse(BlockMatrix([[A]])) == A

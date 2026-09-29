@@ -1,0 +1,125 @@
+diff --git a/src/_pytest/mark/evaluate.py b/src/_pytest/mark/evaluate.py
+index 7591916..6ac7b64 100644
+--- a/src/_pytest/mark/evaluate.py
++++ b/src/_pytest/mark/evaluate.py
+@@ -2,7 +2,6 @@ import os
+ import platform
+ import sys
+ import traceback
+-from typing import Any
+ from typing import Dict
+ from typing import List
+ from typing import Optional
+@@ -10,25 +9,7 @@ from typing import Optional
+ from ..outcomes import fail
+ from ..outcomes import TEST_OUTCOME
+ from .structures import Mark
+-from _pytest.config import Config
+ from _pytest.nodes import Item
+-from _pytest.store import StoreKey
+-
+-
+-evalcache_key = StoreKey[Dict[str, Any]]()
+-
+-
+-def cached_eval(config: Config, expr: str, d: Dict[str, object]) -> Any:
+-    default = {}  # type: Dict[str, object]
+-    evalcache = config._store.setdefault(evalcache_key, default)
+-    try:
+-        return evalcache[expr]
+-    except KeyError:
+-        import _pytest._code
+-
+-        exprcode = _pytest._code.compile(expr, mode="eval")
+-        evalcache[expr] = x = eval(exprcode, d)
+-        return x
+ 
+ 
+ class MarkEvaluator:
+@@ -98,7 +79,10 @@ class MarkEvaluator:
+                     self.expr = expr
+                     if isinstance(expr, str):
+                         d = self._getglobals()
+-                        result = cached_eval(self.item.config, expr, d)
++                        import _pytest._code
++
++                        exprcode = _pytest._code.compile(expr, mode="eval")
++                        result = eval(exprcode, d)
+                     else:
+                         if "reason" not in mark.kwargs:
+                             # XXX better be checked at collection time
+diff --git a/testing/test_skipping.py b/testing/test_skipping.py
+index a6f1a9c..3e71ccf 100644
+--- a/testing/test_skipping.py
++++ b/testing/test_skipping.py
+@@ -133,6 +133,35 @@ class TestEvaluator:
+ 
+ 
+ class TestXFail:
++    def test_xfail_module_globals(self, testdir):
++        testdir.makepyfile(
++            test_one="""
++                import pytest
++                xfail = True
++                @pytest.mark.xfail("xfail")
++                def test_one():
++                    assert False
++            """,
++            test_two="""
++                import pytest
++                xfail = False
++                @pytest.mark.xfail("xfail")
++                def test_two():
++                    assert False
++            """,
++        )
++        result = testdir.runpytest("-rx")
++        result.stdout.fnmatch_lines(
++            [
++                "*def test_two():*",
++                "*assert False*",
++                "*XFAIL test_one.py::test_one*",
++                "*condition: xfail*",
++                "*1 failed, 1 xfailed*",
++            ]
++        )
++        assert result.ret == 1
++
+     @pytest.mark.parametrize("strict", [True, False])
+     def test_xfail_simple(self, testdir, strict):
+         item = testdir.getitem(
+@@ -629,6 +658,34 @@ class TestSkip:
+ 
+ 
+ class TestSkipif:
++    def test_skipif_module_globals(self, testdir):
++        testdir.makepyfile(
++            test_one="""
++                import pytest
++                skip = True
++                @pytest.mark.skipif("skip")
++                def test_one():
++                    assert False
++            """,
++            test_two="""
++                import pytest
++                skip = False
++                @pytest.mark.skipif("skip")
++                def test_two():
++                    assert False
++            """,
++        )
++        result = testdir.runpytest("-rs")
++        result.stdout.fnmatch_lines(
++            [
++                "*def test_two():*",
++                "*assert False*",
++                "*SKIP*test_one.py*condition: skip*",
++                "*1 failed, 1 skipped*",
++            ]
++        )
++        assert result.ret == 1
++
+     def test_skipif_conditional(self, testdir):
+         item = testdir.getitem(
+             """

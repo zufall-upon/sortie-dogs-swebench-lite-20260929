@@ -1,0 +1,43 @@
+diff --git a/sklearn/decomposition/kernel_pca.py b/sklearn/decomposition/kernel_pca.py
+index bb91d0c..cec4365 100644
+--- a/sklearn/decomposition/kernel_pca.py
++++ b/sklearn/decomposition/kernel_pca.py
+@@ -220,6 +220,12 @@ class KernelPCA(BaseEstimator, TransformerMixin, _UnstableOn32BitMixin):
+             self.alphas_ = self.alphas_[:, self.lambdas_ > 0]
+             self.lambdas_ = self.lambdas_[self.lambdas_ > 0]
+ 
++        # flip eigenvectors' sign to enforce deterministic output
++        max_abs_rows = np.argmax(np.abs(self.alphas_), axis=0)
++        signs = np.sign(self.alphas_[max_abs_rows,
++                                     np.arange(self.alphas_.shape[1])])
++        self.alphas_ *= signs
++
+         return K
+ 
+     def _fit_inverse_transform(self, X_transformed, X):
+diff --git a/sklearn/decomposition/tests/test_kernel_pca.py b/sklearn/decomposition/tests/test_kernel_pca.py
+index 4e4c5cb..374bcee 100644
+--- a/sklearn/decomposition/tests/test_kernel_pca.py
++++ b/sklearn/decomposition/tests/test_kernel_pca.py
+@@ -96,6 +96,21 @@ def test_kernel_pca_sparse():
+             # assert_equal(X_pred2.shape, X_pred.shape)
+ 
+ 
++def test_kernel_pca_signs():
++    X_fit = np.random.RandomState(0).randn(201, 3)
++    transformed = []
++    for random_state in (0, 1):
++        kpca = KernelPCA(n_components=7, kernel='rbf', copy_X=False,
++                         n_jobs=-1, random_state=random_state)
++        transformed.append(kpca.fit_transform(X_fit))
++
++    assert_array_almost_equal(transformed[0], transformed[1], decimal=6)
++
++    max_abs_rows = np.argmax(np.abs(transformed[0]), axis=0)
++    assert np.all(transformed[0][max_abs_rows,
++                                 np.arange(transformed[0].shape[1])] > 0)
++
++
+ def test_kernel_pca_linear_kernel():
+     rng = np.random.RandomState(0)
+     X_fit = rng.random_sample((5, 4))

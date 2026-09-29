@@ -1,0 +1,48 @@
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index dadd4ac..509d4f8 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -2037,10 +2037,14 @@ class InlineModelAdmin(BaseModelAdmin):
+         self.opts = self.model._meta
+         self.has_registered_model = admin_site.is_registered(self.model)
+         super().__init__()
+-        if self.verbose_name is None:
++        verbose_name = self.verbose_name
++        if verbose_name is None:
+             self.verbose_name = self.model._meta.verbose_name
+         if self.verbose_name_plural is None:
+-            self.verbose_name_plural = self.model._meta.verbose_name_plural
++            if verbose_name is None:
++                self.verbose_name_plural = self.model._meta.verbose_name_plural
++            else:
++                self.verbose_name_plural = format_lazy('{}s', verbose_name)
+ 
+     @property
+     def media(self):
+diff --git a/tests/admin_inlines/tests.py b/tests/admin_inlines/tests.py
+index 261c4f0..4f7558a 100644
+--- a/tests/admin_inlines/tests.py
++++ b/tests/admin_inlines/tests.py
+@@ -967,6 +967,22 @@ class TestReadOnlyChangeViewInlinePermissions(TestCase):
+ class TestVerboseNameInlineForms(TestDataMixin, TestCase):
+     factory = RequestFactory()
+ 
++    def test_verbose_name_only_inline(self):
++        class VerboseNameProfileInline(TabularInline):
++            model = VerboseNameProfile
++            verbose_name = 'Custom child'
++
++        inline = VerboseNameProfileInline(ProfileCollection, admin_site)
++        self.assertEqual(inline.verbose_name, 'Custom child')
++        self.assertEqual(inline.verbose_name_plural, 'Custom childs')
++
++        class DefaultProfileInline(TabularInline):
++            model = Profile
++
++        default_inline = DefaultProfileInline(ProfileCollection, admin_site)
++        self.assertEqual(default_inline.verbose_name, Profile._meta.verbose_name)
++        self.assertEqual(default_inline.verbose_name_plural, Profile._meta.verbose_name_plural)
++
+     def test_verbose_name_plural_inline(self):
+         class NonVerboseProfileInline(TabularInline):
+             model = Profile

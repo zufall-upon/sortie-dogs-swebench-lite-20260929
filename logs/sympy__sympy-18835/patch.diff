@@ -1,0 +1,77 @@
+diff --git a/sympy/utilities/iterables.py b/sympy/utilities/iterables.py
+index d96e762..cb3182a 100644
+--- a/sympy/utilities/iterables.py
++++ b/sympy/utilities/iterables.py
+@@ -2106,22 +2106,37 @@ def uniq(seq, result=None):
+     >>> list(uniq([[1], [2, 1], [1]]))
+     [[1], [2, 1]]
+     """
++    seq_len = len(seq) if isinstance(seq, list) else None
++
++    def check_seq_size():
++        if seq_len is not None and len(seq) != seq_len:
++            raise RuntimeError("list changed size during iteration")
++
+     try:
+         seen = set()
+         result = result or []
+         for i, s in enumerate(seq):
++            check_seq_size()
+             if not (s in seen or seen.add(s)):
+                 yield s
++        check_seq_size()
+     except TypeError:
++        check_seq_size()
+         if s not in result:
+             yield s
++            check_seq_size()
+             result.append(s)
+         if hasattr(seq, '__getitem__'):
+             for s in uniq(seq[i + 1:], result):
++                check_seq_size()
+                 yield s
++                check_seq_size()
+         else:
+             for s in uniq(seq, result):
++                check_seq_size()
+                 yield s
++                check_seq_size()
++        check_seq_size()
+ 
+ 
+ def generate_bell(n):
+diff --git a/sympy/utilities/tests/test_iterables.py b/sympy/utilities/tests/test_iterables.py
+index 030db33..0b33df8 100644
+--- a/sympy/utilities/tests/test_iterables.py
++++ b/sympy/utilities/tests/test_iterables.py
+@@ -704,6 +704,30 @@ def test_uniq():
+     assert list(uniq([2, 3, 2, 4, [2], [1], [2], [3], [1]])) == \
+         [2, 3, 4, [2], [1], [3]]
+ 
++    def mutate_during_iteration(seq, mutation, expected_items, expected_seq):
++        items = []
++
++        def consume():
++            for item in uniq(seq):
++                items.append(item)
++                mutation(seq, item)
++
++        raises(RuntimeError, consume)
++        assert items == expected_items
++        assert seq == expected_seq
++
++    mutate_during_iteration(list('THISTLE'), lambda seq, item: seq.remove(item),
++                            ['T'], list('HISTLE'))
++    mutate_during_iteration([1, 2], lambda seq, item: seq.append(3),
++                            [1], [1, 2, 3])
++    mutate_during_iteration([1], lambda seq, item: seq.remove(item),
++                            [1], [])
++    mutate_during_iteration([[1], [2], [3]],
++                            lambda seq, item: seq.remove(item),
++                            [[1]], [[2], [3]])
++    mutate_during_iteration([[1]], lambda seq, item: seq.remove(item),
++                            [[1]], [])
++
+ 
+ def test_kbins():
+     assert len(list(kbins('1123', 2, ordered=1))) == 24

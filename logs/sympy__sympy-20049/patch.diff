@@ -1,0 +1,90 @@
+diff --git a/sympy/physics/vector/point.py b/sympy/physics/vector/point.py
+index d4e3cfc..6c1d30c 100644
+--- a/sympy/physics/vector/point.py
++++ b/sympy/physics/vector/point.py
+@@ -499,6 +499,11 @@ def v2pt_theory(self, otherpoint, outframe, fixedframe):
+     def vel(self, frame):
+         """The velocity Vector of this Point in the ReferenceFrame.
+ 
++        If this point's velocity is not explicitly defined, it is calculated
++        from its position relative to a point with a defined velocity. If no
++        such point is connected by position, a directly related point is
++        treated as fixed.
++
+         Parameters
+         ==========
+ 
+@@ -518,10 +523,26 @@ def vel(self, frame):
+         """
+ 
+         _check_frame(frame)
+-        if not (frame in self._vel_dict):
+-            raise ValueError('Velocity of point ' + self.name + ' has not been'
+-                             ' defined in ReferenceFrame ' + frame.name)
+-        return self._vel_dict[frame]
++        if frame in self._vel_dict:
++            return self._vel_dict[frame]
++
++        points = [self]
++        visited = {self}
++        for point in points:
++            if frame in point._vel_dict:
++                return (point._vel_dict[frame] +
++                        self.pos_from(point).dt(frame))
++            for otherpoint in point._pos_dict:
++                if otherpoint not in visited:
++                    points.append(otherpoint)
++                    visited.add(otherpoint)
++
++        for point in self._pos_dict:
++            if point is not self:
++                return self.pos_from(point).dt(frame)
++
++        raise ValueError('Velocity of point ' + self.name + ' has not been'
++                         ' defined in ReferenceFrame ' + frame.name)
+ 
+     def partial_velocity(self, frame, *gen_speeds):
+         """Returns the partial velocities of the linear velocity vector of this
+diff --git a/sympy/physics/vector/tests/test_point.py b/sympy/physics/vector/tests/test_point.py
+index 052b5c3..681f96d 100644
+--- a/sympy/physics/vector/tests/test_point.py
++++ b/sympy/physics/vector/tests/test_point.py
+@@ -112,6 +112,38 @@ def test_point_pos():
+     assert Q.pos_from(O) == 10 * N.x + 10 * N.y + 5 * B.x + 5 * B.y
+     assert O.pos_from(Q) == -10 * N.x - 10 * N.y - 5 * B.x - 5 * B.y
+ 
++
++def test_point_vel_from_pos():
++    q = dynamicsymbols('q')
++    qd = dynamicsymbols('q', 1)
++    A = ReferenceFrame('A')
++    B = A.orientnew('B', 'Axis', (q, A.x))
++    P, Q = Point('P'), Point('Q')
++    r = q * A.x + 2 * q * A.y
++    Q.set_pos(P, r)
++
++    assert B.ang_vel_in(A) == qd * A.x
++    assert r.dt(A) == qd * A.x + 2 * qd * A.y
++    assert Q.vel(A) == r.dt(A)
++
++    raises(ValueError, lambda: Point('R').vel(A))
++
++
++def test_point_vel_from_pos_uses_reference_velocity():
++    q, u = dynamicsymbols('q u')
++    qd = dynamicsymbols('q', 1)
++    N = ReferenceFrame('N')
++    O, P, Q = Point('O'), Point('P'), Point('Q')
++    O.set_vel(N, u * N.x)
++    P.set_pos(O, q * N.y)
++    Q.set_pos(P, q * N.z)
++
++    assert Q.vel(N) == u * N.x + qd * (N.y + N.z)
++
++    Q.set_vel(N, 3 * N.x)
++    assert Q.vel(N) == 3 * N.x
++
++
+ def test_point_partial_velocity():
+ 
+     N = ReferenceFrame('N')

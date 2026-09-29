@@ -1,0 +1,28 @@
+diff --git a/sympy/matrices/common.py b/sympy/matrices/common.py
+index 056d9bc..4aa75e4 100644
+--- a/sympy/matrices/common.py
++++ b/sympy/matrices/common.py
+@@ -86,7 +86,7 @@ def entry(i, j):
+                 return self[i, j]
+             elif pos <= j < pos + other.cols:
+                 return other[i, j - pos]
+-            return self[i, j - pos - other.cols]
++            return self[i, j - other.cols]
+ 
+         return self._new(self.rows, self.cols + other.cols,
+                          lambda i, j: entry(i, j))
+diff --git a/sympy/matrices/tests/test_matrices.py b/sympy/matrices/tests/test_matrices.py
+index 78bd30f..5d8df87 100644
+--- a/sympy/matrices/tests/test_matrices.py
++++ b/sympy/matrices/tests/test_matrices.py
+@@ -2234,6 +2234,10 @@ def test_col_insert():
+         l.insert(i, 4)
+         assert flatten(zeros(3).col_insert(i, c4).row(0).tolist()) == l
+ 
++    M = eye(6)
++    V = 2*ones(6, 2)
++    assert M.col_insert(3, V) == M[:, :3].row_join(V).row_join(M[:, 3:])
++
+ 
+ def test_normalized():
+     assert Matrix([3, 4]).normalized() == \

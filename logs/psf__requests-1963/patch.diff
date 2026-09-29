@@ -1,0 +1,78 @@
+diff --git a/requests/sessions.py b/requests/sessions.py
+index 425db22..5162d26 100644
+--- a/requests/sessions.py
++++ b/requests/sessions.py
+@@ -181,6 +181,7 @@ class SessionRedirectMixin(object):
+             extract_cookies_to_jar(self.cookies, prepared_request, resp.raw)
+ 
+             i += 1
++            req = prepared_request
+             yield resp
+ 
+ 
+diff --git a/test_requests.py b/test_requests.py
+index 17de849..efe55a1 100755
+--- a/test_requests.py
++++ b/test_requests.py
+@@ -118,6 +118,61 @@ class RequestsTestCase(unittest.TestCase):
+         assert r.history[0].status_code == 302
+         assert r.history[0].is_redirect
+ 
++    def _redirect_response(self, status_code, request, location=None):
++        response = requests.Response()
++        response.status_code = status_code
++        response.url = request.url
++        response.request = request
++        response._content = b''
++        response.raw = type('Raw', (), {'release_conn': lambda self: None})()
++        if location:
++            response.headers['Location'] = location
++        return response
++
++    def test_redirect_303_then_307_preserves_get(self):
++        session = requests.Session()
++        session.trust_env = False
++        origin = requests.Request(
++            'POST', 'http://server.example.com/do_something',
++            data='payload').prepare()
++        seen = []
++
++        def send(request, **kwargs):
++            seen.append((request.method, request.url, request.body))
++            if len(seen) == 1:
++                return self._redirect_response(
++                    307, request, '//failover.example.com/new_thing_1513')
++            return self._redirect_response(200, request)
++
++        session.send = send
++        first = self._redirect_response(303, origin, '/new_thing_1513')
++        list(session.resolve_redirects(first, origin))
++
++        self.assertEqual(seen, [
++            ('GET', 'http://server.example.com/new_thing_1513', None),
++            ('GET', 'http://failover.example.com/new_thing_1513', None),
++        ])
++
++    def test_redirect_307_preserves_post(self):
++        session = requests.Session()
++        session.trust_env = False
++        origin = requests.Request(
++            'POST', 'http://server.example.com/do_something',
++            data='payload').prepare()
++        seen = []
++
++        def send(request, **kwargs):
++            seen.append((request.method, request.url, request.body))
++            return self._redirect_response(200, request)
++
++        session.send = send
++        first = self._redirect_response(
++            307, origin, '//failover.example.com/new_thing_1513')
++        list(session.resolve_redirects(first, origin))
++
++        self.assertEqual(seen, [(
++            'POST', 'http://failover.example.com/new_thing_1513', 'payload')])
++
+     # def test_HTTP_302_ALLOW_REDIRECT_POST(self):
+     #     r = requests.post(httpbin('status', '302'), data={'some': 'data'})
+     #     self.assertEqual(r.status_code, 200)

@@ -1,0 +1,199 @@
+diff --git a/django/forms/widgets.py b/django/forms/widgets.py
+index 02aa32b..6fad841 100644
+--- a/django/forms/widgets.py
++++ b/django/forms/widgets.py
+@@ -59,22 +59,20 @@ class Media:
+ 
+     @property
+     def _css(self):
+-        css = self._css_lists[0]
+-        # filter(None, ...) avoids calling merge with empty dicts.
+-        for obj in filter(None, self._css_lists[1:]):
+-            css = {
+-                medium: self.merge(css.get(medium, []), obj.get(medium, []))
+-                for medium in css.keys() | obj.keys()
+-            }
+-        return css
++        css_lists = [self._css_lists[0]] + list(filter(None, self._css_lists[1:]))
++        if len(css_lists) == 1:
++            return css_lists[0]
++        return {
++            medium: self.merge(*(obj.get(medium, []) for obj in css_lists))
++            for medium in set().union(*(obj.keys() for obj in css_lists))
++        }
+ 
+     @property
+     def _js(self):
+-        js = self._js_lists[0]
+-        # filter(None, ...) avoids calling merge() with empty lists.
+-        for obj in filter(None, self._js_lists[1:]):
+-            js = self.merge(js, obj)
+-        return js
++        js_lists = [self._js_lists[0]] + list(filter(None, self._js_lists[1:]))
++        if len(js_lists) == 1:
++            return js_lists[0]
++        return self.merge(*js_lists)
+ 
+     def render(self):
+         return mark_safe('\n'.join(chain.from_iterable(getattr(self, 'render_' + name)() for name in MEDIA_TYPES)))
+@@ -115,9 +113,9 @@ class Media:
+         raise KeyError('Unknown media type "%s"' % name)
+ 
+     @staticmethod
+-    def merge(list_1, list_2):
++    def merge(list_1, list_2, *lists):
+         """
+-        Merge two lists while trying to keep the relative order of the elements.
++        Merge lists while trying to keep the relative order of the elements.
+         Warn if the lists have the same two elements in a different relative
+         order.
+ 
+@@ -125,6 +123,72 @@ class Media:
+         in a certain order. In JavaScript you may not be able to reference a
+         global or in CSS you might want to override a style.
+         """
++        if lists:
++            # Merging a previously merged list would introduce ordering
++            # constraints between files that weren't ordered in the original
++            # media definitions. Build the dependency graph from the original
++            # lists instead.
++            source_lists = (list_1, list_2) + lists
++            dependencies = {}
++            paths = []
++            source_path_positions = []
++            for source_list in source_lists:
++                unique_paths = []
++                for path in source_list:
++                    if path not in unique_paths:
++                        unique_paths.append(path)
++                        if path not in dependencies:
++                            dependencies[path] = set()
++                            paths.append(path)
++                for index, path in enumerate(unique_paths[1:], 1):
++                    dependencies[path].add(unique_paths[index - 1])
++                source_path_positions.append({
++                    path: index for index, path in enumerate(unique_paths)
++                })
++
++            combined_list = []
++            while dependencies:
++                for path in paths:
++                    if path in dependencies and not dependencies[path]:
++                        break
++                else:
++                    conflicting_paths = [path for path in paths if path in dependencies]
++                    warning_paths = conflicting_paths[:2]
++                    for path_index, path in enumerate(conflicting_paths):
++                        for other_path in conflicting_paths[path_index + 1:]:
++                            if (
++                                any(
++                                    path in positions and other_path in positions and
++                                    positions[path] < positions[other_path]
++                                    for positions in source_path_positions
++                                ) and any(
++                                    path in positions and other_path in positions and
++                                    positions[other_path] < positions[path]
++                                    for positions in source_path_positions
++                                )
++                            ):
++                                warning_paths = [path, other_path]
++                                break
++                        else:
++                            continue
++                        break
++                    warnings.warn(
++                        'Detected duplicate Media files in an opposite order:\n'
++                        '%s\n%s' % tuple(warning_paths),
++                        MediaOrderConflictWarning,
++                    )
++                    combined_list = []
++                    for source_list in source_lists:
++                        for path in source_list:
++                            if path not in combined_list:
++                                combined_list.append(path)
++                    return combined_list
++                combined_list.append(path)
++                del dependencies[path]
++                for path_dependencies in dependencies.values():
++                    path_dependencies.discard(path)
++            return combined_list
++
+         # Start with a copy of list_1.
+         combined_list = list(list_1)
+         last_insert_index = len(list_1)
+diff --git a/tests/forms_tests/tests/test_media.py b/tests/forms_tests/tests/test_media.py
+index 8cb484a..4d5da75 100644
+--- a/tests/forms_tests/tests/test_media.py
++++ b/tests/forms_tests/tests/test_media.py
+@@ -1,4 +1,7 @@
+-from django.forms import CharField, Form, Media, MultiWidget, TextInput
++import warnings
++
++from django.forms import CharField, Form, Media, MultiWidget, TextInput, Widget
++from django.forms.widgets import MediaOrderConflictWarning
+ from django.template import Context, Template
+ from django.test import SimpleTestCase, override_settings
+ 
+@@ -481,6 +484,31 @@ class FormsMediaTestCase(SimpleTestCase):
+ <script type="text/javascript" src="/path/to/js4"></script>"""
+         )
+ 
++        class ColorPicker(Widget):
++            class Media:
++                js = ['color-picker.js']
++
++        class SimpleTextWidget(Widget):
++            class Media:
++                js = ['text-editor.js']
++
++        class FancyTextWidget(Widget):
++            class Media:
++                js = ['text-editor.js', 'text-editor-extras.js', 'color-picker.js']
++
++        class MyForm(Form):
++            background_color = CharField(widget=ColorPicker())
++            intro = CharField(widget=SimpleTextWidget())
++            body = CharField(widget=FancyTextWidget())
++
++        with warnings.catch_warnings(record=True) as caught:
++            warnings.simplefilter('always', MediaOrderConflictWarning)
++            self.assertEqual(
++                MyForm().media._js,
++                ['text-editor.js', 'text-editor-extras.js', 'color-picker.js'],
++            )
++        self.assertEqual(caught, [])
++
+         # Forms can also define media, following the same rules as widgets.
+         class FormWithMedia(Form):
+             field1 = CharField(max_length=20, widget=MyWidget1())
+@@ -541,6 +569,19 @@ class FormsMediaTestCase(SimpleTestCase):
+         msg = 'Detected duplicate Media files in an opposite order:\n1\n2'
+         with self.assertWarnsMessage(RuntimeWarning, msg):
+             self.assertEqual(Media.merge([1, 2], [2, 1]), [1, 2])
++        with self.assertWarnsMessage(RuntimeWarning, msg):
++            self.assertEqual(Media.merge([1, 2], [2, 1], [1]), [1, 2])
++        msg = 'Detected duplicate Media files in an opposite order:\na\nb'
++        with self.assertWarnsMessage(RuntimeWarning, msg):
++            self.assertEqual(
++                Media.merge(['a', 'x'], ['a', 'b'], ['b', 'a']),
++                ['a', 'x', 'b'],
++            )
++        with self.assertWarnsMessage(RuntimeWarning, msg):
++            self.assertEqual(
++                Media.merge(['a', 'b'], ['b', 'c'], ['c', 'a']),
++                ['a', 'b', 'c'],
++            )
+ 
+     def test_merge_js_three_way(self):
+         """
+@@ -569,5 +610,8 @@ class FormsMediaTestCase(SimpleTestCase):
+         self.assertEqual(form2._css, {'screen': ['b.css', 'a.css']})
+         # ...but merging succeeds as the relative ordering of a.css and b.css
+         # was never specified.
+-        merged = widget3 + form1 + form2
+-        self.assertEqual(merged._css, {'screen': ['a.css', 'b.css'], 'all': ['c.css']})
++        with warnings.catch_warnings(record=True) as caught:
++            warnings.simplefilter('always', MediaOrderConflictWarning)
++            merged = widget3 + form1 + form2
++            self.assertEqual(merged._css, {'screen': ['a.css', 'b.css'], 'all': ['c.css']})
++        self.assertEqual(caught, [])

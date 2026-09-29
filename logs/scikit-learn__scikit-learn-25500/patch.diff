@@ -1,0 +1,56 @@
+diff --git a/sklearn/calibration.py b/sklearn/calibration.py
+index 2c4a336..42f3b89 100644
+--- a/sklearn/calibration.py
++++ b/sklearn/calibration.py
+@@ -760,7 +760,7 @@ class _CalibratedClassifier:
+                 # When binary, `predictions` consists only of predictions for
+                 # clf.classes_[1] but `pos_class_indices` = 0
+                 class_idx += 1
+-            proba[:, class_idx] = calibrator.predict(this_pred)
++            proba[:, class_idx] = np.ravel(calibrator.predict(this_pred))
+ 
+         # Normalize the probabilities
+         if n_classes == 2:
+diff --git a/sklearn/tests/test_calibration.py b/sklearn/tests/test_calibration.py
+index c10a9c8..f6a2272 100644
+--- a/sklearn/tests/test_calibration.py
++++ b/sklearn/tests/test_calibration.py
+@@ -6,6 +6,7 @@ import numpy as np
+ from numpy.testing import assert_allclose
+ from scipy import sparse
+ 
++from sklearn import config_context
+ from sklearn.base import BaseEstimator, clone
+ from sklearn.dummy import DummyClassifier
+ from sklearn.model_selection import LeaveOneOut, train_test_split
+@@ -25,7 +26,7 @@ from sklearn.ensemble import (
+     RandomForestClassifier,
+     VotingClassifier,
+ )
+-from sklearn.linear_model import LogisticRegression, LinearRegression
++from sklearn.linear_model import LogisticRegression, LinearRegression, SGDClassifier
+ from sklearn.tree import DecisionTreeClassifier
+ from sklearn.svm import LinearSVC
+ from sklearn.pipeline import Pipeline, make_pipeline
+@@ -436,6 +437,21 @@ def test_calibration_nan_imputer(ensemble):
+     clf_c.predict(X)
+ 
+ 
++def test_calibrated_classifier_isotonic_pandas_output():
++    X = np.arange(90).reshape(30, -1)
++    y = np.arange(30) % 2
++
++    with config_context(transform_output="pandas"):
++        clf = CalibratedClassifierCV(SGDClassifier(), method="isotonic")
++        clf.fit(X, y)
++        proba = clf.predict_proba(X)
++        y_pred = clf.predict(X)
++
++    assert proba.shape == (len(y), len(clf.classes_))
++    assert_allclose(proba.sum(axis=1), 1)
++    assert_array_equal(y_pred, clf.classes_[np.argmax(proba, axis=1)])
++
++
+ @pytest.mark.parametrize("ensemble", [True, False])
+ def test_calibration_prob_sum(ensemble):
+     # Test that sum of probabilities is 1. A non-regression test for

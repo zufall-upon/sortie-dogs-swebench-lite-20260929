@@ -1,0 +1,99 @@
+diff --git a/django/db/backends/base/creation.py b/django/db/backends/base/creation.py
+index c50fc90..f29b13a 100644
+--- a/django/db/backends/base/creation.py
++++ b/django/db/backends/base/creation.py
+@@ -5,7 +5,7 @@ from io import StringIO
+ from django.apps import apps
+ from django.conf import settings
+ from django.core import serializers
+-from django.db import router
++from django.db import router, transaction
+ 
+ # The prefix to put on the default database name when creating
+ # the test database.
+@@ -126,8 +126,11 @@ class BaseDatabaseCreation:
+         the serialize_db_to_string() method.
+         """
+         data = StringIO(data)
+-        for obj in serializers.deserialize("json", data, using=self.connection.alias):
+-            obj.save()
++        with transaction.atomic(using=self.connection.alias):
++            with self.connection.constraint_checks_disabled():
++                for obj in serializers.deserialize("json", data, using=self.connection.alias):
++                    obj.save(using=self.connection.alias)
++            self.connection.check_constraints()
+ 
+     def _get_database_display_str(self, verbosity, database_name):
+         """
+diff --git a/tests/test_utils/test_transactiontestcase.py b/tests/test_utils/test_transactiontestcase.py
+index 4e183a5..225944c 100644
+--- a/tests/test_utils/test_transactiontestcase.py
++++ b/tests/test_utils/test_transactiontestcase.py
+@@ -1,9 +1,10 @@
+ from unittest import mock
+ 
+-from django.db import connections
++from django.core import serializers
++from django.db import IntegrityError, connection, connections
+ from django.test import TestCase, TransactionTestCase, override_settings
+ 
+-from .models import Car
++from .models import Car, Person, PossessedCar
+ 
+ 
+ class TestSerializedRollbackInhibitsPostMigrate(TransactionTestCase):
+@@ -33,6 +34,54 @@ class TestSerializedRollbackInhibitsPostMigrate(TransactionTestCase):
+         )
+ 
+ 
++class SerializedRollbackForeignKeyTests(TransactionTestCase):
++    available_apps = ['test_utils']
++    databases = {'default', 'other'}
++
++    def test_deserialization_with_forward_references(self):
++        car = Car.objects.create(name='car')
++        person = Person.objects.create(name='person')
++        possessed_car = PossessedCar.objects.create(car=car, belongs_to=person)
++        data = serializers.serialize('json', [possessed_car, car, person])
++
++        PossessedCar.objects.all().delete()
++        Car.objects.all().delete()
++        Person.objects.all().delete()
++
++        connection.creation.deserialize_db_from_string(data)
++
++        restored = PossessedCar.objects.get()
++        self.assertEqual(restored.car.name, car.name)
++        self.assertEqual(restored.belongs_to.name, person.name)
++
++    def test_deserialization_uses_connection_alias(self):
++        data = serializers.serialize('json', [
++            PossessedCar(pk=1, car_id=1, belongs_to_id=1),
++            Car(pk=1, name='car'),
++            Person(pk=1, name='person'),
++        ])
++        other = connections['other']
++
++        other.creation.deserialize_db_from_string(data)
++
++        restored = PossessedCar.objects.using('other').get()
++        self.assertEqual(restored.car.name, 'car')
++        self.assertEqual(restored.belongs_to.name, 'person')
++        self.assertFalse(PossessedCar.objects.using('default').exists())
++
++    def test_deserialization_rolls_back_on_error(self):
++        data = serializers.serialize('json', [
++            Car(pk=1, name='car'),
++            PossessedCar(pk=1, car_id=1, belongs_to_id=1),
++        ])
++
++        with self.assertRaises(IntegrityError):
++            connection.creation.deserialize_db_from_string(data)
++
++        self.assertFalse(Car.objects.exists())
++        self.assertFalse(PossessedCar.objects.exists())
++
++
+ @override_settings(DEBUG=True)  # Enable query logging for test_queries_cleared
+ class TransactionTestCaseDatabasesTests(TestCase):
+     available_apps = []

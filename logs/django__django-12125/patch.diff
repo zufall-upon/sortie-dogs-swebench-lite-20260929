@@ -1,0 +1,105 @@
+diff --git a/django/db/migrations/serializer.py b/django/db/migrations/serializer.py
+index 7d22695..672010a 100644
+--- a/django/db/migrations/serializer.py
++++ b/django/db/migrations/serializer.py
+@@ -75,8 +75,8 @@ class DecimalSerializer(BaseSerializer):
+ 
+ class DeconstructableSerializer(BaseSerializer):
+     @staticmethod
+-    def serialize_deconstructed(path, args, kwargs):
+-        name, imports = DeconstructableSerializer._serialize_path(path)
++    def serialize_deconstructed(path, args, kwargs, module=None):
++        name, imports = DeconstructableSerializer._serialize_path(path, module)
+         strings = []
+         for arg in args:
+             arg_string, arg_imports = serializer_factory(arg).serialize()
+@@ -89,8 +89,11 @@ class DeconstructableSerializer(BaseSerializer):
+         return "%s(%s)" % (name, ", ".join(strings)), imports
+ 
+     @staticmethod
+-    def _serialize_path(path):
+-        module, name = path.rsplit(".", 1)
++    def _serialize_path(path, module=None):
++        if module is None or not path.startswith(module + "."):
++            module, name = path.rsplit(".", 1)
++        else:
++            name = path[len(module) + 1:]
+         if module == "django.db.models":
+             imports = {"from django.db import models"}
+             name = "models.%s" % name
+@@ -196,7 +199,7 @@ class IterableSerializer(BaseSerializer):
+ class ModelFieldSerializer(DeconstructableSerializer):
+     def serialize(self):
+         attr_name, path, args, kwargs = self.value.deconstruct()
+-        return self.serialize_deconstructed(path, args, kwargs)
++        return self.serialize_deconstructed(path, args, kwargs, self.value.__class__.__module__)
+ 
+ 
+ class ModelManagerSerializer(DeconstructableSerializer):
+@@ -269,7 +272,10 @@ class TypeSerializer(BaseSerializer):
+             if module == builtins.__name__:
+                 return self.value.__name__, set()
+             else:
+-                return "%s.%s" % (module, self.value.__name__), {"import %s" % module}
++                name = self.value.__qualname__
++                if '<locals>' in name:
++                    name = self.value.__name__
++                return "%s.%s" % (module, name), {"import %s" % module}
+ 
+ 
+ class UUIDSerializer(BaseSerializer):
+diff --git a/tests/migrations/test_writer.py b/tests/migrations/test_writer.py
+index ca924f3..5e3d004 100644
+--- a/tests/migrations/test_writer.py
++++ b/tests/migrations/test_writer.py
+@@ -35,6 +35,11 @@ class Money(decimal.Decimal):
+         )
+ 
+ 
++class Outer:
++    class Inner(models.CharField):
++        pass
++
++
+ class TestModel1:
+     def upload_to(self):
+         return '/somewhere/dynamic/'
+@@ -299,6 +304,17 @@ class WriterTests(SimpleTestCase):
+                 {'import migrations.test_writer'},
+             ),
+         )
++        self.assertSerializedResultEqual(
++            models.CharField(default=self.NestedEnum),
++            (
++                'models.CharField(default=migrations.test_writer.WriterTests.NestedEnum)',
++                {'from django.db import models', 'import migrations.test_writer'},
++            ),
++        )
++        self.assertIs(
++            self.serialize_round_trip(models.CharField(default=self.NestedEnum)).default,
++            self.NestedEnum,
++        )
+         self.assertSerializedEqual(self.NestedEnum.A)
+ 
+         field = models.CharField(default=TextEnum.B, choices=[(m.value, m) for m in TextEnum])
+@@ -444,6 +460,20 @@ class WriterTests(SimpleTestCase):
+             models.CharField(max_length=255),
+             ("models.CharField(max_length=255)", {"from django.db import models"})
+         )
++        operation = migrations.CreateModel('A', [('field', Outer.Inner(max_length=20))])
++        self.assertSerializedResultEqual(
++            operation,
++            (
++                'migrations.CreateModel(\n'
++                '    name=\'A\',\n'
++                '    fields=[\n'
++                '        (\'field\', migrations.test_writer.Outer.Inner(max_length=20)),\n'
++                '    ],\n'
++                ')',
++                {'import migrations.test_writer'},
++            ),
++        )
++        self.assertSerializedFieldEqual(Outer.Inner(max_length=20))
+         self.assertSerializedFieldEqual(models.TextField(null=True, blank=True))
+         self.assertSerializedResultEqual(
+             models.TextField(null=True, blank=True),

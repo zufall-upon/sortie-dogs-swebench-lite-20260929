@@ -1,0 +1,44 @@
+diff --git a/sympy/simplify/tests/test_trigsimp.py b/sympy/simplify/tests/test_trigsimp.py
+index 67694b4..0bb2f91 100644
+--- a/sympy/simplify/tests/test_trigsimp.py
++++ b/sympy/simplify/tests/test_trigsimp.py
+@@ -50,6 +50,20 @@ def test_trigsimp1():
+     assert trigsimp(log(e)) == log(2)
+ 
+ 
++def test_trigsimp_exponential_to_trig():
++    f = 1 / 2 * (-I*exp(I*k) + I*exp(-I*k))
++    g = 1 / 2 / k * (-I*exp(I*k) + I*exp(-I*k))
++
++    assert trigsimp(f) == 1.0*sin(k)
++    assert trigsimp(g) == 1.0*sin(k)/k
++    assert trigsimp(S.Half*(-I*exp(I*k) + I*exp(-I*k))) == sin(k)
++
++    # A lone exponential is not improved by rewriting it, and trigsimp keeps
++    # the established sin(k)/k representation rather than normalizing to sinc.
++    assert trigsimp(exp(I*k)) == exp(I*k)
++    assert trigsimp(sin(k)/k) == sin(k)/k
++
++
+ def test_trigsimp1a():
+     assert trigsimp(sin(2)**2*cos(3)*exp(2)/cos(2)**2) == tan(2)**2*cos(3)*exp(2)
+     assert trigsimp(tan(2)**2*cos(3)*exp(2)*cos(2)**2) == sin(2)**2*cos(3)*exp(2)
+diff --git a/sympy/simplify/trigsimp.py b/sympy/simplify/trigsimp.py
+index 34a3bab..ab0b272 100644
+--- a/sympy/simplify/trigsimp.py
++++ b/sympy/simplify/trigsimp.py
+@@ -480,6 +480,14 @@ def trigsimp(expr, **opts):
+     except AttributeError:
+         pass
+ 
++    # Rewrite complex exponentials as trigonometric functions when this makes
++    # the expression simpler.  Expanding products lets matching exponential
++    # terms cancel after the rewrite.
++    if expr.has(exp) and expr.has(I):
++        newexpr = expand_mul(expr.rewrite(sin))
++        if count_ops(newexpr) < count_ops(expr):
++            expr = newexpr
++
+     old = opts.pop('old', False)
+     if not old:
+         opts.pop('deep', None)

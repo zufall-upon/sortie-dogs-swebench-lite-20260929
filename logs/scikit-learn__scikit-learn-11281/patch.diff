@@ -1,0 +1,93 @@
+diff --git a/sklearn/mixture/base.py b/sklearn/mixture/base.py
+index a9f6674..dc1ec53 100644
+--- a/sklearn/mixture/base.py
++++ b/sklearn/mixture/base.py
+@@ -14,6 +14,7 @@ import numpy as np
+ 
+ from .. import cluster
+ from ..base import BaseEstimator
++from ..base import ClusterMixin
+ from ..base import DensityMixin
+ from ..externals import six
+ from ..exceptions import ConvergenceWarning
+@@ -64,7 +65,8 @@ def _check_X(X, n_components=None, n_features=None, ensure_min_samples=1):
+     return X
+ 
+ 
+-class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
++class BaseMixture(six.with_metaclass(ABCMeta, ClusterMixin, DensityMixin,
++                                     BaseEstimator)):
+     """Base class for mixture models.
+ 
+     This abstract class specifies an interface for all mixture classes and
+@@ -239,6 +241,7 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
+ 
+         self._set_parameters(best_params)
+         self.n_iter_ = best_n_iter
++        self.labels_ = self.predict(X)
+ 
+         return self
+ 
+diff --git a/sklearn/mixture/bayesian_mixture.py b/sklearn/mixture/bayesian_mixture.py
+index aef6828..a867323 100644
+--- a/sklearn/mixture/bayesian_mixture.py
++++ b/sklearn/mixture/bayesian_mixture.py
+@@ -186,6 +186,9 @@ class BayesianGaussianMixture(BaseMixture):
+ 
+     Attributes
+     ----------
++    labels_ : array, shape (n_samples,)
++        Labels of each training sample.
++
+     weights_ : array-like, shape (n_components,)
+         The weights of each mixture components.
+ 
+diff --git a/sklearn/mixture/gaussian_mixture.py b/sklearn/mixture/gaussian_mixture.py
+index d58a9e3..2c676b6 100644
+--- a/sklearn/mixture/gaussian_mixture.py
++++ b/sklearn/mixture/gaussian_mixture.py
+@@ -522,6 +522,9 @@ class GaussianMixture(BaseMixture):
+ 
+     Attributes
+     ----------
++    labels_ : array, shape (n_samples,)
++        Labels of each training sample.
++
+     weights_ : array-like, shape (n_components,)
+         The weights of each mixture components.
+ 
+diff --git a/sklearn/mixture/tests/test_mixture.py b/sklearn/mixture/tests/test_mixture.py
+index a79cafe..87cfe27 100644
+--- a/sklearn/mixture/tests/test_mixture.py
++++ b/sklearn/mixture/tests/test_mixture.py
+@@ -4,6 +4,7 @@
+ import pytest
+ import numpy as np
+ 
++from sklearn.base import ClusterMixin
+ from sklearn.mixture import GaussianMixture
+ from sklearn.mixture import BayesianGaussianMixture
+ 
+@@ -21,3 +22,22 @@ def test_gaussian_mixture_n_iter(estimator):
+     estimator.set_params(max_iter=max_iter)
+     estimator.fit(X)
+     assert estimator.n_iter_ == max_iter
++
++
++@pytest.mark.parametrize(
++    "estimator",
++    [GaussianMixture, BayesianGaussianMixture]
++)
++def test_gaussian_mixture_clusterer_interface(estimator):
++    X = np.array([[0.], [0.1], [5.], [5.1]])
++    model = estimator(n_components=2, n_init=2, random_state=0,
++                      warm_start=True)
++
++    assert isinstance(model, ClusterMixin)
++    labels = model.fit_predict(X)
++    np.testing.assert_array_equal(labels, model.labels_)
++    np.testing.assert_array_equal(labels, model.predict(X))
++
++    # A subsequent warm-started fit should refresh labels_ for the new fit.
++    model.fit(X)
++    np.testing.assert_array_equal(model.labels_, model.predict(X))

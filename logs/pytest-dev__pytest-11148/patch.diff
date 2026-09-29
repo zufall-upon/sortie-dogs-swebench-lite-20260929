@@ -1,0 +1,126 @@
+diff --git a/src/_pytest/pathlib.py b/src/_pytest/pathlib.py
+index e43310e..af4f0a8 100644
+--- a/src/_pytest/pathlib.py
++++ b/src/_pytest/pathlib.py
+@@ -524,6 +524,16 @@ def import_path(
+     if mode is ImportMode.importlib:
+         module_name = module_name_from_path(path, root)
+ 
++        module = sys.modules.get(module_name)
++        if module is not None:
++            module_file = getattr(module, "__file__", None)
++            if module_file is not None:
++                try:
++                    if _is_same(module_file, str(path)):
++                        return module
++                except OSError:
++                    pass
++
+         for meta_importer in sys.meta_path:
+             spec = meta_importer.find_spec(module_name, [str(path.parent)])
+             if spec is not None:
+diff --git a/testing/test_collection.py b/testing/test_collection.py
+index c370951..fca7584 100644
+--- a/testing/test_collection.py
++++ b/testing/test_collection.py
+@@ -1550,6 +1550,49 @@ class TestImportModeImportlib:
+             ]
+         )
+ 
++    def test_collect_normally_imported_namespace_module(
++        self, pytester: Pytester
++    ) -> None:
++        """Collection reuses a module imported from a PEP 420 namespace package."""
++        pytester.makeini(
++            """
++            [pytest]
++            pythonpath = .
++            """
++        )
++        pytester.makepyfile(
++            conftest="import helper",
++            helper="""
++                import namespace_pkg.test_module as module
++
++                module_ref = module
++                class_ref = module.Stateful
++                module.Stateful.store = []
++                store_ref = module.Stateful.store
++            """,
++            **{
++                "namespace_pkg/test_module.py": """
++                    class Stateful:
++                        pass
++
++                    def test_module_identity():
++                        import sys
++                        import helper
++
++                        module_name = "namespace_pkg.test_module"
++                        assert sys.modules[module_name] is helper.module_ref
++                        assert sys.modules[module_name] is sys.modules[__name__]
++                        assert Stateful is helper.class_ref
++                        assert helper.module_ref.Stateful is helper.class_ref
++                        assert Stateful.store is helper.store_ref
++                """
++            },
++        )
++        result = pytester.runpytest(
++            "--import-mode=importlib", "namespace_pkg/test_module.py"
++        )
++        result.stdout.fnmatch_lines(["* 1 passed in *"])
++
+     def test_conftest(self, pytester: Pytester) -> None:
+         """Directory containing conftest modules are not put in sys.path as a side-effect of
+         importing them."""
+diff --git a/testing/test_pathlib.py b/testing/test_pathlib.py
+index c15a81e..a7f5c7b 100644
+--- a/testing/test_pathlib.py
++++ b/testing/test_pathlib.py
+@@ -298,13 +298,35 @@ class TestImportPath:
+         assert "_src" in sys.modules
+         assert "_src.tests" in sys.modules
+ 
+-    def test_importmode_twice_is_different_module(
++    def test_importmode_twice_returns_same_module(
+         self, simple_module: Path, tmp_path: Path
+     ) -> None:
+-        """`importlib` mode always returns a new module."""
++        """`importlib` mode reuses the module if it is already imported."""
+         module1 = import_path(simple_module, mode="importlib", root=tmp_path)
+         module2 = import_path(simple_module, mode="importlib", root=tmp_path)
++        assert module1 is module2
++        assert sys.modules[module1.__name__] is module1
++
++    def test_importmode_same_name_different_path(self, tmp_path: Path) -> None:
++        root1 = tmp_path / "root1"
++        root2 = tmp_path / "root2"
++        root1.mkdir()
++        root2.mkdir()
++        path1 = root1 / "test_module.py"
++        path2 = root2 / "test_module.py"
++        path1.write_text("value = 1", encoding="utf-8")
++        path2.write_text("value = 2", encoding="utf-8")
++
++        module1 = import_path(path1, mode="importlib", root=root1)
++        # A stale module path must not prevent importing a different module at the same name.
++        path1.unlink()
++        module2 = import_path(path2, mode="importlib", root=root2)
++
++        assert module1.__name__ == module2.__name__ == "test_module"
+         assert module1 is not module2
++        assert module1.value == 1  # type: ignore[attr-defined]
++        assert module2.value == 2  # type: ignore[attr-defined]
++        assert sys.modules[module1.__name__] is module2
+ 
+     def test_no_meta_path_found(
+         self, simple_module: Path, monkeypatch: MonkeyPatch, tmp_path: Path
+@@ -317,6 +339,8 @@ class TestImportPath:
+         # mode='importlib' fails if no spec is found to load the module
+         import importlib.util
+ 
++        # Make sure this tests the spec lookup rather than reusing the module above.
++        monkeypatch.delitem(sys.modules, module.__name__)
+         monkeypatch.setattr(
+             importlib.util, "spec_from_file_location", lambda *args: None
+         )

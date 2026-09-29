@@ -1,0 +1,49 @@
+diff --git a/sklearn/cluster/_affinity_propagation.py b/sklearn/cluster/_affinity_propagation.py
+index 4806afe..0c388d2 100644
+--- a/sklearn/cluster/_affinity_propagation.py
++++ b/sklearn/cluster/_affinity_propagation.py
+@@ -200,6 +200,7 @@ def affinity_propagation(S, preference=None, convergence_iter=15, max_iter=200,
+     else:
+         if verbose:
+             print("Did not converge")
++        E = np.zeros(n_samples, dtype=bool)
+ 
+     I = np.flatnonzero(E)
+     K = I.size  # Identify exemplars
+diff --git a/sklearn/cluster/tests/test_affinity_propagation.py b/sklearn/cluster/tests/test_affinity_propagation.py
+index 98f0f79..497858e 100644
+--- a/sklearn/cluster/tests/test_affinity_propagation.py
++++ b/sklearn/cluster/tests/test_affinity_propagation.py
+@@ -107,6 +107,32 @@ def test_affinity_propagation_fit_non_convergence():
+     assert_array_equal(np.array([-1, -1, -1]), af.labels_)
+ 
+ 
++def test_affinity_propagation_non_convergence_with_exemplar():
++    pd = pytest.importorskip('pandas')
++    X = pd.DataFrame([[1, 0, 0, 0, 0, 0],
++                      [0, 1, 1, 1, 0, 0],
++                      [0, 0, 1, 0, 0, 1]])
++
++    af = assert_warns(
++        ConvergenceWarning,
++        AffinityPropagation(affinity='euclidean', verbose=True, copy=False,
++                            max_iter=2).fit, X)
++    assert_array_equal([], af.cluster_centers_indices_)
++    assert_array_equal([-1, -1, -1], af.labels_)
++    assert_array_equal(np.empty((0, X.shape[1])), af.cluster_centers_)
++
++    labels = assert_warns(ConvergenceWarning, af.predict, X)
++    assert_array_equal([-1, -1, -1], labels)
++
++    S = -euclidean_distances(X, squared=True)
++    centers, labels, n_iter = assert_warns(
++        ConvergenceWarning, affinity_propagation, S, max_iter=2,
++        return_n_iter=True)
++    assert_array_equal([], centers)
++    assert_array_equal([-1, -1, -1], labels)
++    assert n_iter == 2
++
++
+ def test_affinity_propagation_equal_mutual_similarities():
+     X = np.array([[-1, 1], [1, -1]])
+     S = -euclidean_distances(X, squared=True)

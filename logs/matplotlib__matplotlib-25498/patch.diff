@@ -1,0 +1,43 @@
+diff --git a/lib/matplotlib/colorbar.py b/lib/matplotlib/colorbar.py
+index d3d53e3..0679761 100644
+--- a/lib/matplotlib/colorbar.py
++++ b/lib/matplotlib/colorbar.py
+@@ -508,6 +508,13 @@ class Colorbar:
+         self.set_alpha(mappable.get_alpha())
+         self.cmap = mappable.cmap
+         if mappable.norm != self.norm:
++            if not mappable.norm.scaled() and mappable.get_array() is not None:
++                # As in __init__, autoscale a replacement norm from the
++                # mappable's data before drawing the colorbar.  Block the
++                # norm's callbacks to avoid re-entering update_normal while
++                # autoscale_None is setting vmin and vmax separately.
++                with mappable.norm.callbacks.blocked():
++                    mappable.autoscale_None()
+             self.norm = mappable.norm
+             self._reset_locator_formatter_scale()
+ 
+diff --git a/lib/matplotlib/tests/test_colorbar.py b/lib/matplotlib/tests/test_colorbar.py
+index e39d007..36f8c4c 100644
+--- a/lib/matplotlib/tests/test_colorbar.py
++++ b/lib/matplotlib/tests/test_colorbar.py
+@@ -658,6 +658,20 @@ def test_colorbar_scale_reset():
+     assert cbar.outline.get_edgecolor() == mcolors.to_rgba('red')
+ 
+ 
++def test_colorbar_norm_replacement():
++    data = 10**np.random.default_rng(0).normal(1, 1, size=(50, 50))
++
++    fig, ax = plt.subplots()
++    plot = ax.imshow(data, cmap='gray')
++    cbar = fig.colorbar(plot, ax=ax)
++    plot.norm = LogNorm()
++
++    assert cbar.norm is plot.norm
++    assert cbar.ax.yaxis.get_scale() == 'log'
++    np.testing.assert_allclose(cbar.vmin, data.min())
++    np.testing.assert_allclose(cbar.vmax, data.max())
++
++
+ def test_colorbar_get_ticks_2():
+     plt.rcParams['_internal.classic_mode'] = False
+     fig, ax = plt.subplots()

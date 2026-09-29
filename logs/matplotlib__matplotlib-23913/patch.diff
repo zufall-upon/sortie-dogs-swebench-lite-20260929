@@ -1,0 +1,49 @@
+diff --git a/lib/matplotlib/legend.py b/lib/matplotlib/legend.py
+index 9e5b903..abebbf3 100644
+--- a/lib/matplotlib/legend.py
++++ b/lib/matplotlib/legend.py
+@@ -162,6 +162,9 @@ bbox_to_anchor : `.BboxBase`, 2-tuple, or 4-tuple of floats
+ 
+         loc='upper right', bbox_to_anchor=(0.5, 0.5)
+ 
++draggable : bool, default: False
++    Whether the legend can be dragged with the mouse.
++
+ ncols : int, default: 1
+     The number of columns that the legend has.
+ 
+@@ -341,6 +344,7 @@ class Legend(Artist):
+         handler_map=None,
+         title_fontproperties=None,  # properties for the legend title
+         alignment="center",       # control the alignment within the legend box
++        draggable=False,
+         *,
+         ncol=1  # synonym for ncols (backward compatibility)
+     ):
+@@ -574,6 +578,8 @@ class Legend(Artist):
+         else:
+             raise ValueError(f"Invalid labelcolor: {labelcolor!r}")
+ 
++        self.set_draggable(draggable)
++
+     def _set_artist_props(self, a):
+         """
+         Set the boilerplate props for artists added to axes.
+diff --git a/lib/matplotlib/tests/test_legend.py b/lib/matplotlib/tests/test_legend.py
+index 16847e0..a1d13bf 100644
+--- a/lib/matplotlib/tests/test_legend.py
++++ b/lib/matplotlib/tests/test_legend.py
+@@ -783,6 +783,13 @@ def test_get_set_draggable():
+     assert not legend.get_draggable()
+ 
+ 
++def test_creation_draggable():
++    fig, ax = plt.subplots()
++    assert not ax.legend([], []).get_draggable()
++    assert ax.legend([], [], draggable=True).get_draggable()
++    plt.close(fig)
++
++
+ def test_alpha_handles():
+     x, n, hh = plt.hist([1, 2, 3], alpha=0.25, label='data', color='red')
+     legend = plt.legend()

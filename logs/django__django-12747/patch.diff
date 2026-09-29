@@ -1,0 +1,29 @@
+diff --git a/django/db/models/query.py b/django/db/models/query.py
+index d9c9b0d..134d6a8 100644
+--- a/django/db/models/query.py
++++ b/django/db/models/query.py
+@@ -734,6 +734,7 @@ class QuerySet:
+         collector = Collector(using=del_query.db)
+         collector.collect(del_query)
+         deleted, _rows_count = collector.delete()
++        _rows_count.setdefault(del_query.model._meta.label, 0)
+ 
+         # Clear the result cache, in case this QuerySet gets reused.
+         self._result_cache = None
+diff --git a/tests/delete/tests.py b/tests/delete/tests.py
+index d842467..a7e5ef5 100644
+--- a/tests/delete/tests.py
++++ b/tests/delete/tests.py
+@@ -265,6 +265,12 @@ class OnDeleteTests(TestCase):
+ 
+ class DeletionTests(TestCase):
+ 
++    def test_queryset_delete_empty_returns_num_rows(self):
++        self.assertEqual(
++            Avatar.objects.filter(pk=999999).delete(),
++            (0, {Avatar._meta.label: 0}),
++        )
++
+     def test_m2m(self):
+         m = M.objects.create()
+         r = R.objects.create()

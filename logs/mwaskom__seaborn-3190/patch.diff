@@ -1,0 +1,66 @@
+diff --git a/seaborn/_core/properties.py b/seaborn/_core/properties.py
+index cd10e26..b95e500 100644
+--- a/seaborn/_core/properties.py
++++ b/seaborn/_core/properties.py
+@@ -4,6 +4,7 @@ import warnings
+ 
+ import numpy as np
+ from pandas import Series
++from pandas.api.types import is_bool_dtype
+ import matplotlib as mpl
+ from matplotlib.colors import to_rgb, to_rgba, to_rgba_array
+ from matplotlib.path import Path
+@@ -541,6 +542,12 @@ class Color(Property):
+     legend = True
+     normed = True
+ 
++    def default_scale(self, data: Series) -> Scale:
++        """Given data, initialize an appropriate color scale."""
++        if is_bool_dtype(data):
++            return Nominal()
++        return super().default_scale(data)
++
+     def standardize(self, val: ColorSpec) -> RGBTuple | RGBATuple:
+         # Return color with alpha channel only if the input spec has it
+         # This is so that RGBA colors can override the Alpha property
+diff --git a/tests/_core/test_plot.py b/tests/_core/test_plot.py
+index 6862dbf..6ba0a76 100644
+--- a/tests/_core/test_plot.py
++++ b/tests/_core/test_plot.py
+@@ -20,6 +20,7 @@ from seaborn._core.moves import Move, Shift, Dodge
+ from seaborn._core.rules import categorical_order
+ from seaborn._core.exceptions import PlotSpecError
+ from seaborn._marks.base import Mark
++from seaborn._marks.bar import Bar
+ from seaborn._stats.base import Stat
+ from seaborn._marks.dot import Dot
+ from seaborn._stats.aggregation import Agg
+@@ -345,6 +346,11 @@ class TestScaling:
+         p = Plot().add(MockMark(), x=["a", "b", "c"]).plot()
+         assert p._scales["x"]("b") == 1
+ 
++    def test_boolean_color(self):
++
++        p = Plot(["a", "b"], [1, 2], color=[True, False]).add(Bar()).plot()
++        assert isinstance(p._scales["color"], Nominal)
++
+     def test_inference_joins(self):
+ 
+         p = (
+diff --git a/tests/_core/test_properties.py b/tests/_core/test_properties.py
+index efef33c..c8920f8 100644
+--- a/tests/_core/test_properties.py
++++ b/tests/_core/test_properties.py
+@@ -213,6 +213,12 @@ class TestColor(DataFixtures):
+         scale = Color().default_scale(x)
+         assert isinstance(scale, Continuous)
+ 
++    def test_default_boolean_data(self):
++
++        x = pd.Series([True, False, True])
++        scale = Color().default_scale(x)
++        assert isinstance(scale, Nominal)
++
+     # TODO default scales for other types
+ 
+     @pytest.mark.parametrize(

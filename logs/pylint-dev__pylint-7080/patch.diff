@@ -1,0 +1,111 @@
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index e2bbf06..35af51d 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -593,7 +593,11 @@ class PyLinter(
+             ):
+                 skip_subtrees: list[str] = []
+                 for root, _, files in os.walk(something):
+-                    if any(root.startswith(s) for s in skip_subtrees):
++                    if any(
++                        os.path.commonpath((root, subtree))
++                        == os.path.normpath(subtree)
++                        for subtree in skip_subtrees
++                    ):
+                         # Skip subtree of already discovered package.
+                         continue
+ 
+@@ -602,6 +606,9 @@ class PyLinter(
+                         self.config.ignore,
+                         self.config.ignore_patterns,
+                         self.config.ignore_paths,
++                    ) or any(
++                        pattern.match(os.path.join(root, ""))
++                        for pattern in self.config.ignore_paths
+                     ):
+                         skip_subtrees.append(root)
+                         continue
+diff --git a/tests/lint/unittest_lint.py b/tests/lint/unittest_lint.py
+index 3dbde39..6a08898 100644
+--- a/tests/lint/unittest_lint.py
++++ b/tests/lint/unittest_lint.py
+@@ -912,6 +912,79 @@ def test_recursive_ignore(ignore_parameter, ignore_parameter_value) -> None:
+     assert module in linted_file_paths
+ 
+ 
++def test_recursive_ignore_configured_relative_path(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    source_directory = Path(HERE).parents[1] / "src"
++    source_directory_existed = source_directory.exists()
++    source_directory.mkdir(exist_ok=True)
++    try:
++        with tempfile.TemporaryDirectory(dir=source_directory) as project_directory:
++            current_directory = os.getcwd()
++            try:
++                os.chdir(project_directory)
++                create_files(
++                    [
++                        "src/good.py",
++                        "src/gen/__init__.py",
++                        "src/generated/good.py",
++                    ]
++                )
++                Path("src/good.py").write_text(
++                    '"""A clean source module."""\n\nVALUE = 1\n', encoding="utf-8"
++                )
++                Path("src/gen/__init__.py").write_text(
++                    '"""A generated package."""\n\nimport os\n', encoding="utf-8"
++                )
++                Path("src/generated/good.py").write_text(
++                    '"""A module next to a generated package."""\n\nVALUE = 2\n',
++                    encoding="utf-8",
++                )
++                run = Run(
++                    [
++                        "--recursive",
++                        "y",
++                        "--ignore-paths",
++                        "^src/gen/.*$",
++                        "src/",
++                    ],
++                    exit=False,
++                )
++                original_walk = os.walk
++
++                def walk_sorted_directories(top, *args, **kwargs):
++                    for root, directories, files in original_walk(
++                        top, *args, **kwargs
++                    ):
++                        # os.walk order is unspecified; visit gen before generated
++                        # to exercise the ignored-prefix pruning boundary.
++                        directories.sort()
++                        yield root, directories, files
++
++                monkeypatch.setattr(os, "walk", walk_sorted_directories)
++                linted_file_paths = [
++                    os.path.abspath(file_item.filepath)
++                    for file_item in run.linter._iterate_file_descrs(
++                        tuple(run.linter._discover_files(["src/"]))
++                    )
++                ]
++            finally:
++                os.chdir(current_directory)
++
++            assert str(Path(project_directory) / "src/good.py") in linted_file_paths
++            assert (
++                str(Path(project_directory) / "src/generated/good.py")
++                in linted_file_paths
++            )
++            assert (
++                str(Path(project_directory) / "src/gen/__init__.py")
++                not in linted_file_paths
++            )
++    finally:
++        if not source_directory_existed:
++            source_directory.rmdir()
++
++
+ def test_import_sibling_module_from_namespace(initialized_linter: PyLinter) -> None:
+     """If the parent directory above `namespace` is on sys.path, ensure that
+     modules under `namespace` can import each other without raising `import-error`."""

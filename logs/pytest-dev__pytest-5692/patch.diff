@@ -1,0 +1,53 @@
+diff --git a/src/_pytest/junitxml.py b/src/_pytest/junitxml.py
+index 15c630b..62eb67d 100644
+--- a/src/_pytest/junitxml.py
++++ b/src/_pytest/junitxml.py
+@@ -11,6 +11,7 @@ src/main/resources/org/jenkinsci/plugins/xunit/types/model/xsd/junit-10.xsd
+ import functools
+ import os
+ import re
++import socket
+ import sys
+ import time
+ 
+@@ -661,6 +662,10 @@ class LogXML:
+             self._get_global_properties_node(),
+             [x.to_xml() for x in self.node_reporters_ordered],
+             name=self.suite_name,
++            hostname=socket.gethostname(),
++            timestamp=time.strftime(
++                "%Y-%m-%dT%H:%M:%S", time.localtime(self.suite_start_time)
++            ),
+             errors=self.stats["error"],
+             failures=self.stats["failure"],
+             skipped=self.stats["skipped"],
+diff --git a/testing/test_junitxml.py b/testing/test_junitxml.py
+index 3196f0e..bc10cf3 100644
+--- a/testing/test_junitxml.py
++++ b/testing/test_junitxml.py
+@@ -1,4 +1,6 @@
+ import os
++import socket
++import time
+ from xml.dom import minidom
+ 
+ import py
+@@ -111,7 +113,17 @@ class TestPython:
+         result, dom = runandparse(testdir)
+         assert result.ret
+         node = dom.find_first_by_tag("testsuite")
+-        node.assert_attr(name="pytest", errors=0, failures=1, skipped=2, tests=5)
++        node.assert_attr(
++            name="pytest",
++            hostname=socket.gethostname(),
++            errors=0,
++            failures=1,
++            skipped=2,
++            tests=5,
++        )
++        timestamp = node["timestamp"]
++        assert timestamp is not None
++        time.strptime(timestamp, "%Y-%m-%dT%H:%M:%S")
+ 
+     def test_summing_simple_with_errors(self, testdir):
+         testdir.makepyfile(

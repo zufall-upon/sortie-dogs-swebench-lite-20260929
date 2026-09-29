@@ -1,0 +1,160 @@
+diff --git a/django/core/management/base.py b/django/core/management/base.py
+index d37d43d..9c6444a 100644
+--- a/django/core/management/base.py
++++ b/django/core/management/base.py
+@@ -5,6 +5,7 @@ be executed through ``django-admin`` or ``manage.py``).
+ import argparse
+ import os
+ import sys
++import textwrap
+ from argparse import ArgumentParser, HelpFormatter
+ from io import TextIOBase
+ 
+@@ -119,6 +120,18 @@ class DjangoHelpFormatter(HelpFormatter):
+         "--skip-checks",
+     }
+ 
++    def _fill_text(self, text, width, indent):
++        if "\n" in text and (
++            text.startswith("\n")
++            or "\t" in text
++            or any(
++                line and not line[0].isspace() for line in text.splitlines()[1:]
++            )
++        ):
++            text = textwrap.dedent(text).strip()
++            return "".join(indent + line for line in text.splitlines(keepends=True))
++        return super()._fill_text(text, width, indent)
++
+     def _reordered_actions(self, actions):
+         return sorted(
+             actions, key=lambda a: set(a.option_strings) & self.show_last != set()
+@@ -215,6 +228,10 @@ class BaseCommand:
+         A short description of the command, which will be printed in
+         help messages.
+ 
++    ``formatter_class``
++        The ``argparse.HelpFormatter`` subclass used to format the
++        command's help text. Defaults to ``DjangoHelpFormatter``.
++
+     ``output_transaction``
+         A boolean indicating whether the command outputs SQL
+         statements; if ``True``, the output will automatically be
+@@ -244,6 +261,7 @@ class BaseCommand:
+ 
+     # Metadata about this command.
+     help = ""
++    formatter_class = DjangoHelpFormatter
+ 
+     # Configuration shortcuts that alter various logic.
+     _called_from_command_line = False
+@@ -286,10 +304,10 @@ class BaseCommand:
+         Create and return the ``ArgumentParser`` which will be used to
+         parse the arguments to this command.
+         """
++        kwargs.setdefault("formatter_class", self.formatter_class)
+         parser = CommandParser(
+             prog="%s %s" % (os.path.basename(prog_name), subcommand),
+             description=self.help or None,
+-            formatter_class=DjangoHelpFormatter,
+             missing_args_message=getattr(self, "missing_args_message", None),
+             called_from_command_line=getattr(self, "_called_from_command_line", None),
+             **kwargs,
+diff --git a/tests/admin_scripts/tests.py b/tests/admin_scripts/tests.py
+index 9d2ca83..12a2b2a 100644
+--- a/tests/admin_scripts/tests.py
++++ b/tests/admin_scripts/tests.py
+@@ -1862,6 +1862,93 @@ class CommandTypes(AdminScriptTestCase):
+             out, "Checks the entire Django project for potential problems."
+         )
+ 
++    def test_multiline_help(self):
++        class Command(BaseCommand):
++            help = (
++                "Import a contract from tzkt.\n"
++                "Example usage:\n"
++                "\t./manage.py tzkt_import 'Tezos Mainnet' "
++                "KT1HTDtMBRCKoNHjfWEEvXneGQpCfPAt6BRe"
++            )
++
++            def add_arguments(self, parser):
++                parser.add_argument("blockchain")
++                parser.add_argument("target")
++
++        output = Command().create_parser("manage.py", "tzkt_import").format_help()
++        expected_help = (
++            "Import a contract from tzkt.\n"
++            "Example usage:\n"
++            "\t./manage.py tzkt_import 'Tezos Mainnet' "
++            "KT1HTDtMBRCKoNHjfWEEvXneGQpCfPAt6BRe"
++        )
++        self.assertIn(expected_help, output)
++
++    def test_multiline_help_indentation(self):
++        class Command(BaseCommand):
++            help = '''
++    Import a contract from tzkt.
++    Example usage:
++        ./manage.py tzkt_import 'Tezos Mainnet' KT1HTDtMBRCKoNHjfWEEvXneGQpCfPAt6BRe
++    '''
++
++            def add_arguments(self, parser):
++                parser.add_argument("blockchain")
++                parser.add_argument("target")
++
++        output = Command().create_parser("manage.py", "tzkt_import").format_help()
++        description = output.split("\n\n", 1)[1].split("\n\n", 1)[0]
++        self.assertEqual(
++            description,
++            "Import a contract from tzkt.\n"
++            "Example usage:\n"
++            "    ./manage.py tzkt_import 'Tezos Mainnet' "
++            "KT1HTDtMBRCKoNHjfWEEvXneGQpCfPAt6BRe",
++        )
++
++    def test_multiline_help_without_indentation(self):
++        help_text = "First line of help.\nSecond line of help."
++
++        class Command(BaseCommand):
++            help = help_text
++
++        output = Command().create_parser("manage.py", "example").format_help()
++        description = output.split("\n\n", 1)[1].split("\n\n", 1)[0]
++        self.assertEqual(description, help_text)
++
++    def test_custom_formatter_class(self):
++        from argparse import RawDescriptionHelpFormatter
++
++        help_text = "First line of help.\nSecond line of help."
++
++        class Command(BaseCommand):
++            help = help_text
++            formatter_class = RawDescriptionHelpFormatter
++
++        output = Command().create_parser("manage.py", "custom").format_help()
++        description = output.split("\n\n", 1)[1].split("\n\n", 1)[0]
++        self.assertEqual(description, help_text)
++
++    def test_multiline_prose_help(self):
++        from argparse import ArgumentParser
++
++        from django.core.management.commands.diffsettings import Command
++
++        actual = (
++            Command()
++            .create_parser("manage.py", "diffsettings")
++            .format_help()
++            .split("\n\n", 1)[1]
++            .split("\n\n", 1)[0]
++        )
++        expected = (
++            ArgumentParser(description=Command.help)
++            .format_help()
++            .split("\n\n", 1)[1]
++            .split("\n\n", 1)[0]
++        )
++        self.assertEqual(actual, expected)
++
+     def test_help_default_options_with_custom_arguments(self):
+         args = ["base_command", "--help"]
+         out, err = self.run_manage(args)

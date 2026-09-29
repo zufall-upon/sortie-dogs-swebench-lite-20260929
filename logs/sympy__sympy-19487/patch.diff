@@ -1,0 +1,67 @@
+diff --git a/sympy/functions/elementary/complexes.py b/sympy/functions/elementary/complexes.py
+index 7fda459..7c20b23 100644
+--- a/sympy/functions/elementary/complexes.py
++++ b/sympy/functions/elementary/complexes.py
+@@ -292,6 +292,12 @@ def doit(self, **hints):
+             return self.args[0] / Abs(self.args[0])
+         return self
+ 
++    def _eval_rewrite_as_Abs(self, arg, **kwargs):
++        if arg.is_zero is False:
++            return arg / Abs(arg)
++        if arg.is_zero is None:
++            return Piecewise((S.Zero, Eq(arg, 0)), (arg / Abs(arg), True))
++
+     @classmethod
+     def eval(cls, arg):
+         # handle what we can
+diff --git a/sympy/functions/elementary/tests/test_complexes.py b/sympy/functions/elementary/tests/test_complexes.py
+index adb6cf0..9e1d076 100644
+--- a/sympy/functions/elementary/tests/test_complexes.py
++++ b/sympy/functions/elementary/tests/test_complexes.py
+@@ -1,7 +1,7 @@
+ from sympy import (
+     Abs, acos, adjoint, arg, atan, atan2, conjugate, cos, DiracDelta,
+     E, exp, expand, Expr, Function, Heaviside, I, im, log, nan, oo,
+-    pi, Rational, re, S, sign, sin, sqrt, Symbol, symbols, transpose,
++    pi, Rational, re, S, sign, sin, sqrt, Symbol, symbols, transpose, Eq,
+     zoo, exp_polar, Piecewise, Interval, comp, Integral, Matrix,
+     ImmutableMatrix, SparseMatrix, ImmutableSparseMatrix, MatrixSymbol,
+     FunctionMatrix, Lambda, Derivative)
+@@ -212,6 +212,7 @@ def test_sign():
+     assert sign(2 + 2*I).simplify() == sign(1 + I)
+     assert sign(im(sqrt(1 - sqrt(3)))) == 1
+     assert sign(sqrt(1 - sqrt(3))) == I
++    assert sign(nan).rewrite(Abs) is nan
+ 
+     x = Symbol('x')
+     assert sign(x).is_finite is True
+@@ -221,6 +222,11 @@ def test_sign():
+     assert sign(x).is_real is None
+     assert sign(x).is_zero is None
+     assert sign(x).doit() == sign(x)
++    rewritten = sign(x).rewrite(Abs)
++    assert rewritten == Piecewise((0, Eq(x, 0)), (x/Abs(x), True))
++    assert rewritten.subs(x, 0) == 0
++    assert rewritten.subs(x, 2) == 1
++    assert rewritten.subs(x, 2 + 3*I) == (2 + 3*I)/Abs(2 + 3*I)
+     assert sign(1.2*x) == sign(x)
+     assert sign(2*x) == sign(x)
+     assert sign(I*x) == I*sign(x)
+@@ -258,6 +264,8 @@ def test_sign():
+     assert sign(x).is_real is True
+     assert sign(x).is_zero is False
+     assert sign(x).doit() == x / Abs(x)
++    z = Symbol('z', complex=True, nonzero=True)
++    assert sign(z).rewrite(Abs) == z / Abs(z)
+     assert sign(Abs(x)) == 1
+     assert Abs(sign(x)) == 1
+ 
+@@ -276,6 +284,7 @@ def test_sign():
+     assert sign(x).is_real is True
+     assert sign(x).is_zero is True
+     assert sign(x).doit() == 0
++    assert sign(x).rewrite(Abs) == 0
+     assert sign(Abs(x)) == 0
+     assert Abs(sign(x)) == 0
+ 

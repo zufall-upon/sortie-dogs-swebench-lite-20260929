@@ -1,0 +1,54 @@
+diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py
+index 7649c39..fc406f1 100644
+--- a/django/db/models/sql/compiler.py
++++ b/django/db/models/sql/compiler.py
+@@ -32,7 +32,7 @@ class SQLCompiler:
+         self.select = None
+         self.annotation_col_map = None
+         self.klass_info = None
+-        self.ordering_parts = re.compile(r'(.*)\s(ASC|DESC)(.*)')
++        self.ordering_parts = re.compile(r'(.*)\s(ASC|DESC)(.*)', re.S)
+         self._meta_ordering = None
+ 
+     def setup_query(self):
+diff --git a/tests/ordering/tests.py b/tests/ordering/tests.py
+index 16e5cc9..08d2470 100644
+--- a/tests/ordering/tests.py
++++ b/tests/ordering/tests.py
+@@ -2,6 +2,7 @@ from datetime import datetime
+ from operator import attrgetter
+ 
+ from django.db.models import Count, DateTimeField, F, Max, OuterRef, Subquery
++from django.db.models.expressions import RawSQL
+ from django.db.models.functions import Upper
+ from django.test import TestCase
+ from django.utils.deprecation import RemovedInDjango31Warning
+@@ -378,6 +379,28 @@ class OrderingTests(TestCase):
+             attrgetter("headline")
+         )
+ 
++    def test_order_by_rawsql_multiline(self):
++        qs = Article.objects.order_by(
++            RawSQL("""
++                CASE WHEN headline = 'Article 1'
++                     THEN 2 ELSE 1 END
++            """, []).desc(),
++            RawSQL("""
++                CASE WHEN headline = 'Article 1'
++                     THEN pub_date ELSE NULL END
++            """, []).asc(),
++            RawSQL("""
++                CASE WHEN headline = 'Article 2'
++                     THEN pub_date ELSE NULL END
++            """, []).desc(),
++        )
++        sql = str(qs.query).upper()
++        fragment = sql[sql.find('ORDER BY'):]
++        self.assertEqual(fragment.count('CASE WHEN'), 3)
++        self.assertEqual(fragment.count('ELSE NULL END'), 2)
++        self.assertEqual(fragment.count(' ASC'), 1)
++        self.assertEqual(fragment.count(' DESC'), 2)
++
+     def test_related_ordering_duplicate_table_reference(self):
+         """
+         An ordering referencing a model with an ordering referencing a model

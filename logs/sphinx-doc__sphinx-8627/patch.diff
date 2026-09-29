@@ -1,0 +1,91 @@
+diff --git a/sphinx/util/typing.py b/sphinx/util/typing.py
+index 2d4f67b..05b4e7b 100644
+--- a/sphinx/util/typing.py
++++ b/sphinx/util/typing.py
+@@ -315,6 +315,8 @@ def stringify(annotation: Any) -> str:
+ def _stringify_py37(annotation: Any) -> str:
+     """stringify() for py37+."""
+     module = getattr(annotation, '__module__', None)
++    if module == '_struct':
++        module = 'struct'
+     if module == 'typing':
+         if getattr(annotation, '_name', None):
+             qualname = annotation._name
+@@ -367,6 +369,8 @@ def _stringify_py37(annotation: Any) -> str:
+ def _stringify_py36(annotation: Any) -> str:
+     """stringify() for py35 and py36."""
+     module = getattr(annotation, '__module__', None)
++    if module == '_struct':
++        module = 'struct'
+     if module == 'typing':
+         if getattr(annotation, '_name', None):
+             qualname = annotation._name
+diff --git a/tests/roots/test-ext-autodoc/target/struct_annotations.py b/tests/roots/test-ext-autodoc/target/struct_annotations.py
+new file mode 100644
+index 0000000..d49b787
+--- /dev/null
++++ b/tests/roots/test-ext-autodoc/target/struct_annotations.py
+@@ -0,0 +1,16 @@
++import pathlib
++import struct
++
++
++def consume_struct(_: struct.Struct) -> None:
++    """Accept a compiled struct."""
++
++
++def make_struct() -> struct.Struct:
++    """Return a compiled struct."""
++    return struct.Struct('i')
++
++
++def make_path() -> pathlib.Path:
++    """Return a path."""
++    return pathlib.Path('.')
+diff --git a/tests/test_ext_autodoc_configs.py b/tests/test_ext_autodoc_configs.py
+index 979c66d..82b2efd 100644
+--- a/tests/test_ext_autodoc_configs.py
++++ b/tests/test_ext_autodoc_configs.py
+@@ -548,6 +548,17 @@ def test_autodoc_typehints_signature(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc',
++                    confoverrides={'autodoc_typehints': "signature"})
++def test_autodoc_typehints_struct_alias(app):
++    options = {"members": None,
++               "undoc-members": True}
++    actual = do_autodoc(app, 'module', 'target.struct_annotations', options)
++    assert '.. py:function:: consume_struct(_: struct.Struct) -> None' in actual
++    assert '.. py:function:: make_struct() -> struct.Struct' in actual
++    assert '.. py:function:: make_path() -> pathlib.Path' in actual
++
++
+ @pytest.mark.sphinx('html', testroot='ext-autodoc',
+                     confoverrides={'autodoc_typehints': "none"})
+ def test_autodoc_typehints_none(app):
+diff --git a/tests/test_util_typing.py b/tests/test_util_typing.py
+index a2565f1..3389b97 100644
+--- a/tests/test_util_typing.py
++++ b/tests/test_util_typing.py
+@@ -8,6 +8,8 @@
+     :license: BSD, see LICENSE for details.
+ """
+ 
++import pathlib
++import struct
+ import sys
+ from numbers import Integral
+ from typing import (Any, Callable, Dict, Generator, List, NewType, Optional, Tuple, TypeVar,
+@@ -127,6 +129,11 @@ def test_stringify():
+     assert stringify(Any) == "Any"
+ 
+ 
++def test_stringify_struct_and_path():
++    assert stringify(struct.Struct) == "struct.Struct"
++    assert stringify(pathlib.Path) == "pathlib.Path"
++
++
+ def test_stringify_type_hints_containers():
+     assert stringify(List) == "List"
+     assert stringify(Dict) == "Dict"

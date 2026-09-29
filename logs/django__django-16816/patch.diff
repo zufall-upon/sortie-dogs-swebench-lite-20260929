@@ -1,0 +1,77 @@
+diff --git a/django/contrib/admin/checks.py b/django/contrib/admin/checks.py
+index 0fefe65..11e9d58 100644
+--- a/django/contrib/admin/checks.py
++++ b/django/contrib/admin/checks.py
+@@ -897,6 +897,8 @@ class ModelAdminChecks(BaseModelAdminChecks):
+             return []
+         try:
+             field = obj.model._meta.get_field(item)
++            if getattr(field, "one_to_many", False):
++                raise FieldDoesNotExist
+         except FieldDoesNotExist:
+             try:
+                 field = getattr(obj.model, item)
+diff --git a/tests/modeladmin/test_checks.py b/tests/modeladmin/test_checks.py
+index 85f2eda..90f315c 100644
+--- a/tests/modeladmin/test_checks.py
++++ b/tests/modeladmin/test_checks.py
+@@ -554,6 +554,59 @@ class ListDisplayTests(CheckTestCase):
+             "admin.E109",
+         )
+ 
++    def test_invalid_reverse_related_query_name(self):
++        class Question(Model):
++            class Meta:
++                app_label = "modeladmin"
++
++        class Choice(Model):
++            question = ForeignKey(Question, CASCADE)
++
++            class Meta:
++                app_label = "modeladmin"
++
++        class QuestionAdmin(ModelAdmin):
++            list_display = ["choice"]
++
++        self.assertEqual(
++            Question._meta.get_field("choice").get_accessor_name(), "choice_set"
++        )
++        self.assertIsInvalid(
++            QuestionAdmin,
++            Question,
++            "The value of 'list_display[0]' refers to 'choice', which is not a "
++            "callable, an attribute of 'QuestionAdmin', or an attribute or method "
++            "on 'modeladmin.Question'.",
++            "admin.E108",
++        )
++
++    def test_valid_reverse_query_name_model_method(self):
++        class QuestionWithMethod(Model):
++            def choice(self):
++                return "choice method"
++
++            class Meta:
++                app_label = "modeladmin"
++
++        class ChoiceWithMethod(Model):
++            question = ForeignKey(
++                QuestionWithMethod,
++                CASCADE,
++                related_name="choice_set",
++                related_query_name="choice",
++            )
++
++            class Meta:
++                app_label = "modeladmin"
++
++        class QuestionAdmin(ModelAdmin):
++            list_display = ["choice"]
++
++        reverse_relation = QuestionWithMethod._meta.get_field("choice")
++        self.assertEqual(reverse_relation.get_accessor_name(), "choice_set")
++        self.assertEqual(reverse_relation.field.related_query_name(), "choice")
++        self.assertIsValid(QuestionAdmin, QuestionWithMethod)
++
+     def test_valid_case(self):
+         @admin.display
+         def a_callable(obj):

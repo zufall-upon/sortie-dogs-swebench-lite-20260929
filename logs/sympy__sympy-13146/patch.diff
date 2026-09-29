@@ -1,0 +1,55 @@
+diff --git a/sympy/simplify/simplify.py b/sympy/simplify/simplify.py
+index f1609aa..aa1b776 100644
+--- a/sympy/simplify/simplify.py
++++ b/sympy/simplify/simplify.py
+@@ -541,6 +541,23 @@ def shorter(*choices):
+             return choices[0]
+         return min(choices, key=measure)
+ 
++    # Float exponents with different precisions may have equal values but
++    # different hashes, preventing equivalent powers from combining. Only
++    # rationalize exponents that match another power in the expression.
++    powers = expr.atoms(Pow)
++    exponents = {}
++    power_counts = defaultdict(int)
++    for power in powers:
++        exponent = (nsimplify(power.exp, rational=True,
++                              rational_conversion='exact')
++                    if power.exp.has(Float) else power.exp)
++        exponents[power] = exponent
++        power_counts[power.base, exponent] += 1
++    expr = expr.xreplace({
++        power: power.func(power.base, exponent)
++        for power, exponent in exponents.items()
++        if power.exp.has(Float) and power_counts[power.base, exponent] > 1
++    })
+     expr = bottom_up(expr, lambda w: w.normal())
+     expr = Mul(*powsimp(expr).as_content_primitive())
+     _e = cancel(expr)
+diff --git a/sympy/simplify/tests/test_simplify.py b/sympy/simplify/tests/test_simplify.py
+index 6acf690..a24c98d 100644
+--- a/sympy/simplify/tests/test_simplify.py
++++ b/sympy/simplify/tests/test_simplify.py
+@@ -457,7 +457,6 @@ def test_issue_4194():
+     assert simplify((4*x + 6*f(y))/(2*x + 3*f(y))) == 2
+ 
+ 
+-@XFAIL
+ def test_simplify_float_vs_integer():
+     # Test for issue 4473:
+     # https://github.com/sympy/sympy/issues/4473
+@@ -465,6 +464,14 @@ def test_simplify_float_vs_integer():
+     assert simplify(x**2 - x**2.0) == 0
+ 
+ 
++def test_issue_13146():
++    expr1 = S(1)/2*x**2.5
++    expr2 = S(1)*x**(S(5)/2)/2
++    res = expr1 - expr2
++    assert simplify(res.evalf(5)) == 0
++    assert simplify(x**2.500000001 - x**2.5) != 0
++
++
+ def test_as_content_primitive():
+     assert (x/2 + y).as_content_primitive() == (S.Half, x + 2*y)
+     assert (x/2 + y).as_content_primitive(clear=False) == (S.One, x/2 + y)

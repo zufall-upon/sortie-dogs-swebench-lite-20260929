@@ -1,0 +1,68 @@
+diff --git a/django/db/migrations/operations/fields.py b/django/db/migrations/operations/fields.py
+index cd3aab4..12c988c 100644
+--- a/django/db/migrations/operations/fields.py
++++ b/django/db/migrations/operations/fields.py
+@@ -247,7 +247,11 @@ class AlterField(FieldOperation):
+         return "alter_%s_%s" % (self.model_name_lower, self.name_lower)
+ 
+     def reduce(self, operation, app_label):
+-        if isinstance(operation, RemoveField) and self.is_same_field_operation(
++        if isinstance(operation, AlterField) and self.is_same_field_operation(
++            operation
++        ):
++            return [operation]
++        elif isinstance(operation, RemoveField) and self.is_same_field_operation(
+             operation
+         ):
+             return [operation]
+diff --git a/tests/migrations/test_optimizer.py b/tests/migrations/test_optimizer.py
+index 6485009..6dfbfa7 100644
+--- a/tests/migrations/test_optimizer.py
++++ b/tests/migrations/test_optimizer.py
+@@ -731,6 +731,46 @@ class OptimizerTests(SimpleTestCase):
+             ],
+         )
+ 
++    def test_alter_field_alter_field(self):
++        initial = migrations.AddField(
++            "book", "title", models.CharField(max_length=256, null=True)
++        )
++        alters = [
++            migrations.AlterField(
++                "book", "title", models.CharField(max_length=128, null=True)
++            ),
++            migrations.AlterField(
++                "book",
++                "title",
++                models.CharField(max_length=128, help_text="help", null=True),
++            ),
++            migrations.AlterField(
++                "book",
++                "title",
++                models.CharField(
++                    max_length=128, help_text="help", default=None, null=True
++                ),
++            ),
++        ]
++        self.assertOptimizesTo(alters, [alters[-1]], app_label="books")
++        self.assertOptimizesTo(
++            [initial, *alters],
++            [migrations.AddField("book", "title", alters[-1].field)],
++            app_label="books",
++        )
++        self.assertDoesNotOptimize(
++            [
++                migrations.AlterField("Foo", "age", models.IntegerField()),
++                migrations.AlterField("Foo", "name", models.FloatField()),
++            ]
++        )
++        self.assertDoesNotOptimize(
++            [
++                migrations.AlterField("Foo", "name", models.IntegerField()),
++                migrations.AlterField("Bar", "name", models.FloatField()),
++            ]
++        )
++
+     def test_swapping_fields_names(self):
+         self.assertDoesNotOptimize(
+             [

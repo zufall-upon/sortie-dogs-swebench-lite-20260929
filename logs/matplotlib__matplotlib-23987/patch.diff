@@ -1,0 +1,46 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index 5bbb786..8dbd4b2 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -2426,9 +2426,10 @@ class Figure(FigureBase):
+             if isinstance(tight_layout, dict):
+                 self.get_layout_engine().set(**tight_layout)
+         elif constrained_layout is not None:
+-            self.set_layout_engine(layout='constrained')
+-            if isinstance(constrained_layout, dict):
+-                self.get_layout_engine().set(**constrained_layout)
++            if constrained_layout is not False:
++                self.set_layout_engine(layout='constrained')
++                if isinstance(constrained_layout, dict):
++                    self.get_layout_engine().set(**constrained_layout)
+         else:
+             # everything is None, so use default:
+             self.set_layout_engine(layout=layout)
+diff --git a/lib/matplotlib/tests/test_figure.py b/lib/matplotlib/tests/test_figure.py
+index 48b4a88..9439b07 100644
+--- a/lib/matplotlib/tests/test_figure.py
++++ b/lib/matplotlib/tests/test_figure.py
+@@ -546,6 +546,23 @@ def test_valid_layouts():
+     assert fig.get_constrained_layout()
+ 
+ 
++def test_constrained_layout_false_subplots_adjust():
++    fig, _ = plt.subplots(constrained_layout=False)
++    with warnings.catch_warnings():
++        warnings.simplefilter("error", UserWarning)
++        fig.subplots_adjust(wspace=0)
++    assert fig.subplotpars.wspace == 0
++    assert fig.get_layout_engine() is None
++
++
++def test_constrained_layout_false_tight_bbox():
++    fig, ax = plt.subplots(figsize=(2, 1), constrained_layout=False)
++    ax.set_ylabel("A long label that needs room")
++    position = ax.get_position().bounds
++    fig.savefig(io.BytesIO(), format="png", bbox_inches="tight")
++    assert ax.get_position().bounds == position
++
++
+ def test_invalid_layouts():
+     fig, ax = plt.subplots(layout="constrained")
+     with pytest.warns(UserWarning):

@@ -1,0 +1,51 @@
+diff --git a/django/db/models/fields/reverse_related.py b/django/db/models/fields/reverse_related.py
+index ccc2223..6595059 100644
+--- a/django/db/models/fields/reverse_related.py
++++ b/django/db/models/fields/reverse_related.py
+@@ -310,7 +310,7 @@ class ManyToManyRel(ForeignObjectRel):
+     def identity(self):
+         return super().identity + (
+             self.through,
+-            self.through_fields,
++            make_hashable(self.through_fields),
+             self.db_constraint,
+         )
+ 
+diff --git a/tests/invalid_models_tests/test_relative_fields.py b/tests/invalid_models_tests/test_relative_fields.py
+index 8909b12..dc42d2e 100644
+--- a/tests/invalid_models_tests/test_relative_fields.py
++++ b/tests/invalid_models_tests/test_relative_fields.py
+@@ -1,3 +1,4 @@
++from copy import copy
+ from unittest import mock
+ 
+ from django.core.checks import Error, Warning as DjangoWarning
+@@ -1600,6 +1601,28 @@ class ComplexClashTests(SimpleTestCase):
+ 
+ @isolate_apps('invalid_models_tests')
+ class M2mThroughFieldsTests(SimpleTestCase):
++    def test_through_fields_hashability(self):
++        class Fan(models.Model):
++            pass
++
++        class Event(models.Model):
++            invitees = models.ManyToManyField(
++                Fan, through='Invitation', through_fields=['event', 'invitee'],
++            )
++
++        class Invitation(models.Model):
++            event = models.ForeignKey(Event, models.CASCADE)
++            invitee = models.ForeignKey(Fan, models.CASCADE)
++
++        rel_with_list = Event._meta.get_field('invitees').remote_field
++        rel_with_tuple = copy(rel_with_list)
++        rel_with_tuple.through_fields = tuple(rel_with_list.through_fields)
++
++        self.assertEqual(rel_with_list.identity, rel_with_tuple.identity)
++        self.assertEqual(hash(rel_with_list.identity), hash(rel_with_tuple.identity))
++        self.assertEqual(rel_with_list, rel_with_tuple)
++        self.assertEqual(hash(rel_with_list), hash(rel_with_tuple))
++
+     def test_m2m_field_argument_validation(self):
+         """
+         ManyToManyField accepts the ``through_fields`` kwarg

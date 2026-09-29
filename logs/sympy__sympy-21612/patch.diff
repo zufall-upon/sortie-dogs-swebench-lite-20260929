@@ -1,0 +1,38 @@
+diff --git a/sympy/parsing/latex/_parse_latex_antlr.py b/sympy/parsing/latex/_parse_latex_antlr.py
+index 2e4a45a..3985843 100644
+--- a/sympy/parsing/latex/_parse_latex_antlr.py
++++ b/sympy/parsing/latex/_parse_latex_antlr.py
+@@ -382,6 +382,11 @@ def convert_frac(frac):
+ 
+     expr_top = convert_expr(frac.upper)
+     expr_bot = convert_expr(frac.lower)
++    if (frac.lower.start.type == LaTeXLexer.CMD_FRAC
++            and isinstance(expr_bot, sympy.Pow)):
++        # Keep a unit numerator around a reciprocal denominator so that the
++        # nested fraction remains grouped when this fraction is inverted.
++        expr_bot = sympy.Mul(1, expr_bot, evaluate=False)
+     inverse_denom = sympy.Pow(expr_bot, -1, evaluate=False)
+     if expr_top == 1:
+         return inverse_denom
+diff --git a/sympy/parsing/tests/test_latex.py b/sympy/parsing/tests/test_latex.py
+index f5c61cd..e29d3dc 100644
+--- a/sympy/parsing/tests/test_latex.py
++++ b/sympy/parsing/tests/test_latex.py
+@@ -251,6 +251,17 @@ def test_parseable():
+     for latex_str, sympy_expr in GOOD_PAIRS:
+         assert parse_latex(latex_str) == sympy_expr, latex_str
+ 
++
++def test_nested_fraction():
++    from sympy.parsing.latex import parse_latex
++
++    parsed = parse_latex(r"\frac{\frac{a^3+b}{c}}{\frac{1}{c^2}}")
++    numerator = _Mul(_Add(_Pow(a, 3), b), _Pow(c, -1))
++    denominator = _Mul(1, _Pow(_Pow(c, 2), -1))
++    expected = _Mul(numerator, _Pow(denominator, -1))
++
++    assert parsed == expected
++
+ # These bad LaTeX strings should raise a LaTeXParsingError when parsed
+ BAD_STRINGS = [
+     r"(",

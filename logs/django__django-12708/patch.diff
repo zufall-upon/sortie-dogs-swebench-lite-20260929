@@ -1,0 +1,162 @@
+diff --git a/django/db/backends/base/schema.py b/django/db/backends/base/schema.py
+index 61f8840..0889abe 100644
+--- a/django/db/backends/base/schema.py
++++ b/django/db/backends/base/schema.py
+@@ -393,7 +393,9 @@ class BaseDatabaseSchemaEditor:
+         news = {tuple(fields) for fields in new_index_together}
+         # Deleted indexes
+         for fields in olds.difference(news):
+-            self._delete_composed_index(model, fields, {'index': True}, self.sql_delete_index)
++            self._delete_composed_index(
++                model, fields, {'index': True, 'unique': False}, self.sql_delete_index
++            )
+         # Created indexes
+         for field_names in news.difference(olds):
+             fields = [model._meta.get_field(field) for field in field_names]
+diff --git a/tests/migrations/test_operations.py b/tests/migrations/test_operations.py
+index 55c2021..0b5ef47 100644
+--- a/tests/migrations/test_operations.py
++++ b/tests/migrations/test_operations.py
+@@ -1731,7 +1731,7 @@ class OperationTests(OperationTestBase):
+         """
+         Tests the AlterIndexTogether operation.
+         """
+-        project_state = self.set_up_test_model("test_alinto")
++        project_state = self.set_up_test_model("test_alinto", unique_together=True)
+         # Test the state alteration
+         operation = migrations.AlterIndexTogether("Pony", [("pink", "weight")])
+         self.assertEqual(operation.describe(), "Alter index_together for Pony (1 constraint(s))")
+@@ -1739,16 +1739,32 @@ class OperationTests(OperationTestBase):
+         operation.state_forwards("test_alinto", new_state)
+         self.assertEqual(len(project_state.models["test_alinto", "pony"].options.get("index_together", set())), 0)
+         self.assertEqual(len(new_state.models["test_alinto", "pony"].options.get("index_together", set())), 1)
++
++        def get_non_unique_indexes():
++            with connection.cursor() as cursor:
++                constraints = connection.introspection.get_constraints(cursor, "test_alinto_pony")
++            return [
++                constraint for constraint in constraints.values()
++                if constraint['columns'] == ["pink", "weight"] and constraint['index'] and
++                not constraint['unique']
++            ]
++
+         # Make sure there's no matching index
+-        self.assertIndexNotExists("test_alinto_pony", ["pink", "weight"])
++        self.assertEqual(get_non_unique_indexes(), [])
+         # Test the database alteration
+         with connection.schema_editor() as editor:
+             operation.database_forwards("test_alinto", editor, project_state, new_state)
+-        self.assertIndexExists("test_alinto_pony", ["pink", "weight"])
++        self.assertEqual(len(get_non_unique_indexes()), 1)
+         # And test reversal
+         with connection.schema_editor() as editor:
+             operation.database_backwards("test_alinto", editor, new_state, project_state)
+-        self.assertIndexNotExists("test_alinto_pony", ["pink", "weight"])
++        self.assertEqual(get_non_unique_indexes(), [])
++        with connection.cursor() as cursor:
++            constraints = connection.introspection.get_constraints(cursor, "test_alinto_pony")
++        self.assertTrue(any(
++            constraint['columns'] == ["pink", "weight"] and constraint['unique']
++            for constraint in constraints.values()
++        ))
+         # And deconstruction
+         definition = operation.deconstruct()
+         self.assertEqual(definition[0], "AlterIndexTogether")
+diff --git a/tests/schema/tests.py b/tests/schema/tests.py
+index 9aa1e23..057cf29 100644
+--- a/tests/schema/tests.py
++++ b/tests/schema/tests.py
+@@ -28,7 +28,7 @@ from .fields import (
+ from .models import (
+     Author, AuthorCharFieldWithIndex, AuthorTextFieldWithIndex,
+     AuthorWithDefaultHeight, AuthorWithEvenLongerName, AuthorWithIndexedName,
+-    AuthorWithIndexedNameAndBirthday, AuthorWithUniqueName,
++    AuthorWithUniqueName,
+     AuthorWithUniqueNameAndBirthday, Book, BookForeignObj, BookWeak,
+     BookWithLongName, BookWithO2O, BookWithoutAuthor, BookWithSlug, IntegerPK,
+     Node, Note, NoteRename, Tag, TagIndexed, TagM2MTest, TagUniqueRename,
+@@ -2203,47 +2203,70 @@ class SchemaTests(TransactionTestCase):
+ 
+     @skipUnlessDBFeature('allows_multiple_constraints_on_same_fields')
+     def test_remove_index_together_does_not_remove_meta_indexes(self):
++        class AuthorWithIndexedNameAndBirthdayAndUnique(Model):
++            name = CharField(max_length=255)
++            birthday = DateField()
++
++            class Meta:
++                app_label = 'schema'
++                apps = new_apps
++                index_together = [['name', 'birthday']]
++                unique_together = [['name', 'birthday']]
++
++        model = AuthorWithIndexedNameAndBirthdayAndUnique
++        self.local_models.append(model)
+         with connection.schema_editor() as editor:
+-            editor.create_model(AuthorWithIndexedNameAndBirthday)
++            editor.create_model(model)
+         # Add the custom index
+         index = Index(fields=['name', 'birthday'], name='author_name_birthday_idx')
+         custom_index_name = index.name
+-        AuthorWithIndexedNameAndBirthday._meta.indexes = [index]
++        model._meta.indexes = [index]
+         with connection.schema_editor() as editor:
+-            editor.add_index(AuthorWithIndexedNameAndBirthday, index)
++            editor.add_index(model, index)
+         # Ensure the indexes exist
+-        constraints = self.get_constraints(AuthorWithIndexedNameAndBirthday._meta.db_table)
++        constraints = self.get_constraints(model._meta.db_table)
+         self.assertIn(custom_index_name, constraints)
+         other_constraints = [
+             name for name, details in constraints.items()
+-            if details['columns'] == ['name', 'birthday'] and details['index'] and name != custom_index_name
++            if details['columns'] == ['name', 'birthday'] and details['index'] and
++            not details['unique'] and name != custom_index_name
+         ]
+         self.assertEqual(len(other_constraints), 1)
+         # Remove index together
+-        index_together = AuthorWithIndexedNameAndBirthday._meta.index_together
++        index_together = model._meta.index_together
+         with connection.schema_editor() as editor:
+-            editor.alter_index_together(AuthorWithIndexedNameAndBirthday, index_together, [])
+-        constraints = self.get_constraints(AuthorWithIndexedNameAndBirthday._meta.db_table)
++            editor.alter_index_together(model, index_together, [])
++        constraints = self.get_constraints(model._meta.db_table)
+         self.assertIn(custom_index_name, constraints)
+         other_constraints = [
+             name for name, details in constraints.items()
+-            if details['columns'] == ['name', 'birthday'] and details['index'] and name != custom_index_name
++            if details['columns'] == ['name', 'birthday'] and details['index'] and
++            not details['unique'] and name != custom_index_name
+         ]
+         self.assertEqual(len(other_constraints), 0)
++        self.assertEqual(
++            sum(
++                details['unique']
++                for details in constraints.values()
++                if details['columns'] == ['name', 'birthday']
++            ),
++            1,
++        )
+         # Re-add index together
+         with connection.schema_editor() as editor:
+-            editor.alter_index_together(AuthorWithIndexedNameAndBirthday, [], index_together)
+-        constraints = self.get_constraints(AuthorWithIndexedNameAndBirthday._meta.db_table)
++            editor.alter_index_together(model, [], index_together)
++        constraints = self.get_constraints(model._meta.db_table)
+         self.assertIn(custom_index_name, constraints)
+         other_constraints = [
+             name for name, details in constraints.items()
+-            if details['columns'] == ['name', 'birthday'] and details['index'] and name != custom_index_name
++            if details['columns'] == ['name', 'birthday'] and details['index'] and
++            not details['unique'] and name != custom_index_name
+         ]
+         self.assertEqual(len(other_constraints), 1)
+         # Drop the index
+         with connection.schema_editor() as editor:
+-            AuthorWithIndexedNameAndBirthday._meta.indexes = []
+-            editor.remove_index(AuthorWithIndexedNameAndBirthday, index)
++            model._meta.indexes = []
++            editor.remove_index(model, index)
+ 
+     @isolate_apps('schema')
+     def test_db_table(self):

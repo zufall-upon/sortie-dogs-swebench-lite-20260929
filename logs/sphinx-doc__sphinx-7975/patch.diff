@@ -1,0 +1,68 @@
+diff --git a/sphinx/environment/adapters/indexentries.py b/sphinx/environment/adapters/indexentries.py
+index 5af2139..e55ead7 100644
+--- a/sphinx/environment/adapters/indexentries.py
++++ b/sphinx/environment/adapters/indexentries.py
+@@ -100,7 +100,7 @@ class IndexEntries:
+ 
+         # sort the index entries; put all symbols at the front, even those
+         # following the letters in ASCII, this is where the chr(127) comes from
+-        def keyfunc(entry: Tuple[str, List]) -> Tuple[str, str]:
++        def keyfunc(entry: Tuple[str, List]) -> Tuple[bool, str, str]:
+             key, (void, void, category_key) = entry
+             if category_key:
+                 # using specified category key to sort
+@@ -108,11 +108,13 @@ class IndexEntries:
+             lckey = unicodedata.normalize('NFD', key.lower())
+             if lckey.startswith('\N{RIGHT-TO-LEFT MARK}'):
+                 lckey = lckey[1:]
+-            if lckey[0:1].isalpha() or lckey.startswith('_'):
++            is_letter = lckey[0:1].isalpha() or lckey.startswith('_')
++            if is_letter:
+                 lckey = chr(127) + lckey
+             # ensure a determinstic order *within* letters by also sorting on
+-            # the entry itself
+-            return (lckey, entry[0])
++            # the entry itself.  Symbols without a category key must be kept
++            # together before letters, regardless of their Unicode value.
++            return (category_key is not None or is_letter, lckey, entry[0])
+         newlist = sorted(new.items(), key=keyfunc)
+ 
+         if group_entries:
+diff --git a/tests/test_environment_indexentries.py b/tests/test_environment_indexentries.py
+index 7f6003d..6936938 100644
+--- a/tests/test_environment_indexentries.py
++++ b/tests/test_environment_indexentries.py
+@@ -8,6 +8,8 @@
+     :license: BSD, see LICENSE for details.
+ """
+ 
++from types import SimpleNamespace
++
+ import pytest
+ 
+ from sphinx.environment.adapters.indexentries import IndexEntries
+@@ -41,6 +43,24 @@ def test_create_single_index(app):
+     assert index[5] == ('ת', [('‏תירבע‎', [[('', '#index-7')], [], None])])
+ 
+ 
++def test_create_symbols_index():
++    entries = [('single', word, 'index-%d' % i, '', key)
++               for i, (word, key) in enumerate((('@', None), ('£', None), ('←', None),
++                                                 ('Apple', None), ('Zebra', 'Custom')))]
++    env = SimpleNamespace(get_domain=lambda _: SimpleNamespace(entries={'index': entries}))
++    builder = SimpleNamespace(get_relative_uri=lambda *args: '')
++
++    index = IndexEntries(env).create_index(builder)
++
++    assert index == [
++        ('Symbols', [('@', [[('', '#index-0')], [], None]),
++                     ('£', [[('', '#index-1')], [], None]),
++                     ('←', [[('', '#index-2')], [], None])]),
++        ('A', [('Apple', [[('', '#index-3')], [], None])]),
++        ('Custom', [('Zebra', [[('', '#index-4')], [], 'Custom'])]),
++    ]
++
++
+ @pytest.mark.sphinx('dummy', freshenv=True)
+ def test_create_pair_index(app):
+     text = (".. index:: pair: docutils; reStructuredText\n"

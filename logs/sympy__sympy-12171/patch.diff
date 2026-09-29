@@ -1,0 +1,52 @@
+diff --git a/sympy/printing/mathematica.py b/sympy/printing/mathematica.py
+index 4c2ffd8..6755ec4 100644
+--- a/sympy/printing/mathematica.py
++++ b/sympy/printing/mathematica.py
+@@ -68,6 +68,14 @@ def _print_Pow(self, expr):
+         return '%s^%s' % (self.parenthesize(expr.base, PREC),
+                           self.parenthesize(expr.exp, PREC))
+ 
++    def _print_Derivative(self, expr):
++        args = [self._print(expr.expr)]
++        args.extend(self._print(variable) for variable in expr.variables)
++        return "D[%s]" % ", ".join(args)
++
++    def _print_Float(self, expr):
++        return StrPrinter._print_Float(self, expr).replace('e', '*^')
++
+     def _print_Mul(self, expr):
+         PREC = precedence(expr)
+         c, nc = expr.args_cnc()
+diff --git a/sympy/printing/tests/test_mathematica.py b/sympy/printing/tests/test_mathematica.py
+index 8fd05ae..d88d274 100644
+--- a/sympy/printing/tests/test_mathematica.py
++++ b/sympy/printing/tests/test_mathematica.py
+@@ -1,5 +1,5 @@
+ from sympy.core import (S, pi, oo, symbols, Function,
+-                        Rational, Integer, Tuple)
++                        Rational, Integer, Tuple, Derivative, Float)
+ from sympy.integrals import Integral
+ from sympy.concrete import Sum
+ from sympy.functions import exp, sin, cos
+@@ -24,11 +24,21 @@ def test_Rational():
+     assert mcode(Rational(3, 7)*x) == "(3/7)*x"
+ 
+ 
++def test_Float():
++    assert mcode(Float('1.0e-5')) == "1.00000000000000*^-5"
++    assert mcode(Float('1.0e-4')) == "0.000100000000000000"
++
++
+ def test_Function():
+     assert mcode(f(x, y, z)) == "f[x, y, z]"
+     assert mcode(sin(x) ** cos(x)) == "Sin[x]^Cos[x]"
+ 
+ 
++def test_Derivative():
++    assert mcode(Derivative(f(x), x)) == "D[f[x], x]"
++    assert mcode(Derivative(f(x), x, x)) == "D[f[x], x, x]"
++
++
+ def test_Pow():
+     assert mcode(x**3) == "x^3"
+     assert mcode(x**(y**3)) == "x^(y^3)"

@@ -1,0 +1,80 @@
+diff --git a/sympy/utilities/codegen.py b/sympy/utilities/codegen.py
+index f0befb2..2cfa7ec 100644
+--- a/sympy/utilities/codegen.py
++++ b/sympy/utilities/codegen.py
+@@ -739,7 +739,11 @@ def routine(self, name, expr, argument_sequence=None, global_vars=None):
+                 try:
+                     new_args.append(name_arg_dict[symbol])
+                 except KeyError:
+-                    new_args.append(InputArgument(symbol))
++                    if isinstance(symbol, MatrixSymbol):
++                        dims = [(S.Zero, dim - 1) for dim in symbol.shape]
++                        new_args.append(InputArgument(symbol, dimensions=dims))
++                    else:
++                        new_args.append(InputArgument(symbol))
+             arg_list = new_args
+ 
+         return Routine(name, arg_list, return_val, local_vars, global_vars)
+diff --git a/sympy/utilities/tests/test_autowrap.py b/sympy/utilities/tests/test_autowrap.py
+index 47fe933..25e0e72 100644
+--- a/sympy/utilities/tests/test_autowrap.py
++++ b/sympy/utilities/tests/test_autowrap.py
+@@ -7,6 +7,7 @@
+ 
+ from sympy.core import symbols, Eq
+ from sympy.core.compatibility import StringIO
++from sympy.matrices import MatrixSymbol
+ from sympy.utilities.autowrap import (autowrap, binary_function,
+             CythonCodeWrapper, UfuncifyCodeWrapper, CodeWrapper)
+ from sympy.utilities.codegen import (
+@@ -48,6 +49,24 @@ def test_cython_wrapper_scalar_function():
+     assert source == expected
+ 
+ 
++def test_cython_wrapper_unused_matrixsymbol_argument():
++    x = MatrixSymbol('x', 2, 1)
++    routine = make_routine('test', 1.0, argument_sequence=[x])
++    code_gen = CythonCodeWrapper(C99CodeGen())
++    source = get_string(code_gen.dump_pyx, [routine])
++
++    expected = (
++        "import numpy as np\n"
++        "cimport numpy as np\n\n"
++        "cdef extern from 'file.h':\n"
++        "    double test(double *x)\n"
++        "\n"
++        "def test_c(np.ndarray[np.double_t, ndim=2] x):\n"
++        "\n"
++        "    return test(<double*> x.data)")
++    assert source == expected
++
++
+ def test_cython_wrapper_outarg():
+     from sympy import Equality
+     x, y, z = symbols('x,y,z')
+diff --git a/sympy/utilities/tests/test_codegen.py b/sympy/utilities/tests/test_codegen.py
+index 1cd56e1..6777c04 100644
+--- a/sympy/utilities/tests/test_codegen.py
++++ b/sympy/utilities/tests/test_codegen.py
+@@ -1,4 +1,4 @@
+-from sympy.core import symbols, Eq, pi, Catalan, Lambda, Dummy
++from sympy.core import symbols, Eq, pi, Catalan, Lambda, Dummy, S
+ from sympy.core.compatibility import StringIO
+ from sympy import erf, Integral, Symbol
+ from sympy import Equality
+@@ -56,6 +56,15 @@ def test_Routine_argument_order():
+     assert [ arg.name for arg in r.arguments ] == [z, x, a, y]
+ 
+ 
++def test_Routine_argument_sequence_unused_matrixsymbol():
++    x = MatrixSymbol('x', 2, 1)
++    routine = make_routine('test', 1.0, argument_sequence=[x])
++
++    assert routine.arguments[0].dimensions == [
++        (S.Zero, S.One), (S.Zero, S.Zero)]
++    assert C99CodeGen().get_prototype(routine) == 'double test(double *x)'
++
++
+ def test_empty_c_code():
+     code_gen = C89CodeGen()
+     source = get_string(code_gen.dump_c, [])

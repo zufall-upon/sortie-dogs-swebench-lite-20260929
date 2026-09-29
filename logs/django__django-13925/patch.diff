@@ -1,0 +1,38 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 4038859..8706940 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -1297,8 +1297,12 @@ class Model(metaclass=ModelBase):
+ 
+     @classmethod
+     def _check_default_pk(cls):
++        # Auto-created parent links inherit their primary key from the parent.
++        pk = cls._meta.pk
++        while pk.auto_created and pk.remote_field and pk.remote_field.parent_link:
++            pk = pk.remote_field.model._meta.pk
+         if (
+-            cls._meta.pk.auto_created and
++            pk.auto_created and
+             not settings.is_overridden('DEFAULT_AUTO_FIELD') and
+             not cls._meta.app_config._is_default_auto_field_overridden
+         ):
+diff --git a/tests/check_framework/test_model_checks.py b/tests/check_framework/test_model_checks.py
+index d4342ad..3424cad 100644
+--- a/tests/check_framework/test_model_checks.py
++++ b/tests/check_framework/test_model_checks.py
+@@ -408,6 +408,15 @@ class ModelDefaultAutoFieldTests(SimpleTestCase):
+ 
+         self.assertEqual(checks.run_checks(app_configs=self.apps.get_app_configs()), [])
+ 
++    def test_inherited_explicit_pk(self):
++        class Parent(models.Model):
++            id = models.IntegerField(primary_key=True)
++
++        class Child(Parent):
++            pass
++
++        self.assertEqual(checks.run_checks(app_configs=self.apps.get_app_configs()), [])
++
+     @isolate_apps('check_framework.apps.CheckPKConfig', kwarg_name='apps')
+     def test_app_default_auto_field(self, apps):
+         class ModelWithPkViaAppConfig(models.Model):

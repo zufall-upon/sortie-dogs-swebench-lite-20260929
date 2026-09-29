@@ -1,0 +1,52 @@
+diff --git a/lib/matplotlib/colors.py b/lib/matplotlib/colors.py
+index 2d3072d..072d24c 100644
+--- a/lib/matplotlib/colors.py
++++ b/lib/matplotlib/colors.py
+@@ -725,6 +725,9 @@ class Colormap:
+                 # Avoid converting large positive values to negative integers.
+                 np.clip(xa, -1, self.N, out=xa)
+                 xa = xa.astype(int)
++        elif xa.dtype == np.uint8:
++            # uint8 cannot represent the extra indices used for over/under/bad.
++            xa = xa.astype(int)
+         # Set the over-range indices before the under-range;
+         # otherwise the under-range values get converted to over-range.
+         xa[xa > self.N - 1] = self._i_over
+diff --git a/lib/matplotlib/tests/test_colors.py b/lib/matplotlib/tests/test_colors.py
+index ff893e7..562ef73 100644
+--- a/lib/matplotlib/tests/test_colors.py
++++ b/lib/matplotlib/tests/test_colors.py
+@@ -1,6 +1,7 @@
+ import copy
+ import itertools
+ import unittest.mock
++import warnings
+ 
+ from io import BytesIO
+ import numpy as np
+@@ -266,6 +267,25 @@ def test_colormap_return_types():
+     assert cmap(x2d).shape == x2d.shape + (4,)
+ 
+ 
++def test_colormap_empty_uint8():
++    cmap = plt.get_cmap()
++    empty = np.empty((0,), dtype=np.uint8)
++    values = np.array([0, 1, 255], dtype=np.uint8)
++    masked = np.ma.array(values, mask=[False, True, False])
++
++    with warnings.catch_warnings(record=True) as recorded:
++        warnings.simplefilter("always")
++        rgba = cmap(empty)
++        values_rgba = cmap(values)
++        masked_rgba = cmap(masked)
++
++    assert not recorded
++    assert rgba.shape == (0, 4)
++    assert_array_equal(values_rgba, cmap(values.astype(int)))
++    assert_array_equal(masked_rgba[[0, 2]], values_rgba[[0, 2]])
++    assert_array_equal(masked_rgba[1], cmap.get_bad())
++
++
+ def test_BoundaryNorm():
+     """
+     GitHub issue #1258: interpolation was failing with numpy

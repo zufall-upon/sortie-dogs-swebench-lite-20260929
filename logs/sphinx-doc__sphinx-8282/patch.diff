@@ -1,0 +1,115 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 978fd5d..fea351c 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1262,6 +1262,8 @@ class FunctionDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # typ
+                     sigs.append(documenter.format_signature())
+         if overloaded:
+             __globals__ = safe_getattr(self.object, '__globals__', {})
++            if self.env.config.autodoc_typehints in ('none', 'description'):
++                kwargs.setdefault('show_annotation', False)
+             for overload in self.analyzer.overloads.get('.'.join(self.objpath)):
+                 overload = evaluate_signature(overload, __globals__,
+                                               self.env.config.autodoc_type_aliases)
+@@ -1478,6 +1480,8 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+             # Use signatures for overloaded methods instead of the implementation method.
+             method = safe_getattr(self._signature_class, self._signature_method_name, None)
+             __globals__ = safe_getattr(method, '__globals__', {})
++            if self.env.config.autodoc_typehints in ('none', 'description'):
++                kwargs.setdefault('show_annotation', False)
+             for overload in overloads:
+                 overload = evaluate_signature(overload, __globals__,
+                                               self.env.config.autodoc_type_aliases)
+@@ -1906,6 +1910,8 @@ class MethodDocumenter(DocstringSignatureMixin, ClassLevelDocumenter):  # type:
+                     sigs.append(documenter.format_signature())
+         if overloaded:
+             __globals__ = safe_getattr(self.object, '__globals__', {})
++            if self.env.config.autodoc_typehints in ('none', 'description'):
++                kwargs.setdefault('show_annotation', False)
+             for overload in self.analyzer.overloads.get('.'.join(self.objpath)):
+                 overload = evaluate_signature(overload, __globals__,
+                                               self.env.config.autodoc_type_aliases)
+diff --git a/tests/roots/test-ext-autodoc/target/overload_typehints.py b/tests/roots/test-ext-autodoc/target/overload_typehints.py
+new file mode 100644
+index 0000000..7e0011e
+--- /dev/null
++++ b/tests/roots/test-ext-autodoc/target/overload_typehints.py
+@@ -0,0 +1,40 @@
++from typing import overload
++
++
++@overload
++def foo(x: int) -> int:
++    ...
++
++
++@overload
++def foo(x: float) -> float:
++    ...
++
++
++def foo(x):
++    """An overloaded function."""
++    return x
++
++
++class Example:
++    @overload
++    def __init__(self, x: int) -> None:
++        ...
++
++    @overload
++    def __init__(self, x: float) -> None:
++        ...
++
++    def __init__(self, x):
++        pass
++
++    @overload
++    def method(self, x: int) -> int:
++        ...
++
++    @overload
++    def method(self, x: float) -> float:
++        ...
++
++    def method(self, x):
++        return x
+diff --git a/tests/test_ext_autodoc_configs.py b/tests/test_ext_autodoc_configs.py
+index 7d51b7f..79b73cf 100644
+--- a/tests/test_ext_autodoc_configs.py
++++ b/tests/test_ext_autodoc_configs.py
+@@ -13,6 +13,7 @@ import sys
+ 
+ import pytest
+ 
++from sphinx import addnodes
+ from sphinx.testing import restructuredtext
+ 
+ from test_ext_autodoc import do_autodoc
+@@ -610,6 +611,25 @@ def test_autodoc_typehints_none(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc',
++                    confoverrides={'autodoc_typehints': "none"})
++def test_autodoc_typehints_none_overload(app):
++    text = """\
++.. automodule:: target.overload_typehints
++   :members:
++   :undoc-members:
++"""
++    doctree = restructuredtext.parse(app, text)
++    signatures = [node.astext() for node in doctree.findall(addnodes.desc_signature)]
++
++    assert sum(signature.endswith('foo(x)') for signature in signatures) == 2
++    assert sum(signature.endswith('Example(x)') for signature in signatures) == 2
++    assert sum(signature.endswith('method(x)') for signature in signatures) == 2
++    assert not any(': int' in signature or ': float' in signature or
++                   '-> int' in signature or '-> float' in signature
++                   for signature in signatures)
++
++
+ @pytest.mark.sphinx('text', testroot='ext-autodoc',
+                     confoverrides={'autodoc_typehints': "description"})
+ def test_autodoc_typehints_description(app):

@@ -1,0 +1,108 @@
+diff --git a/sympy/printing/mathml.py b/sympy/printing/mathml.py
+index 1aa0ee0..5c9d27e 100644
+--- a/sympy/printing/mathml.py
++++ b/sympy/printing/mathml.py
+@@ -391,6 +391,15 @@ def translate(s):
+     _print_MatrixSymbol = _print_Symbol
+     _print_RandomSymbol = _print_Symbol
+ 
++    def _print_Indexed(self, expr):
++        x = self.dom.createElement('apply')
++        x.appendChild(self.dom.createElement('selector'))
++        base = getattr(expr.base, 'label', expr.base)
++        x.appendChild(self._print(base))
++        for index in expr.indices:
++            x.appendChild(self._print(index))
++        return x
++
+     def _print_Pow(self, e):
+         # Here we use root instead of power if the exponent is the reciprocal of an integer
+         if self._settings['root_notation'] and e.exp.is_Rational and e.exp.p == 1:
+@@ -848,6 +857,24 @@ def _print_MatrixSymbol(self, sym):
+ 
+     _print_RandomSymbol = _print_Symbol
+ 
++    def _print_Indexed(self, expr):
++        msub = self.dom.createElement('msub')
++        base = getattr(expr.base, 'label', expr.base)
++        msub.appendChild(self._print(base))
++
++        if len(expr.indices) == 1:
++            subscript = self._print(expr.indices[0])
++        else:
++            subscript = self.dom.createElement('mrow')
++            for i, index in enumerate(expr.indices):
++                if i:
++                    comma = self.dom.createElement('mo')
++                    comma.appendChild(self.dom.createTextNode(','))
++                    subscript.appendChild(comma)
++                subscript.appendChild(self._print(index))
++        msub.appendChild(subscript)
++        return msub
++
+     def _print_conjugate(self, expr):
+         enc = self.dom.createElement('menclose')
+         enc.setAttribute('notation', 'top')
+diff --git a/sympy/printing/tests/test_mathml.py b/sympy/printing/tests/test_mathml.py
+index 74e09fb..7109b40 100644
+--- a/sympy/printing/tests/test_mathml.py
++++ b/sympy/printing/tests/test_mathml.py
+@@ -1,7 +1,7 @@
+ from sympy import diff, Integral, Limit, sin, Symbol, Integer, Rational, cos, \
+     tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh, E, I, oo, \
+     pi, GoldenRatio, EulerGamma, Sum, Eq, Ne, Ge, Lt, Float, Matrix, Basic, S, \
+-    MatrixSymbol, Function, Derivative, log, Lambda
++    MatrixSymbol, Function, Derivative, log, Lambda, Indexed, IndexedBase
+ from sympy.core.containers import Tuple
+ from sympy.functions.elementary.complexes import re, im, Abs, conjugate
+ from sympy.functions.elementary.integers import floor, ceiling
+@@ -383,6 +383,21 @@ def test_content_symbol():
+     del mml
+ 
+ 
++def test_content_indexed():
++    a, b, c = Symbol('a'), Symbol('b'), Symbol('c')
++    indexed = IndexedBase(a)[b]
++    indexed_xml = '<apply><selector/><ci>a</ci><ci>b</ci></apply>'
++
++    assert mathml(indexed) == indexed_xml
++    assert mathml(indexed + x) == (
++        '<apply><plus/><ci>x</ci>' + indexed_xml + '</apply>')
++    assert mathml(IndexedBase(a)[b, c]) == (
++        '<apply><selector/><ci>a</ci><ci>b</ci><ci>c</ci></apply>')
++    assert mathml(Indexed(Matrix([[1, 2]]), b)) == (
++        '<apply><selector/><matrix><matrixrow><cn>1</cn><cn>2</cn>'
++        '</matrixrow></matrix><ci>b</ci></apply>')
++
++
+ def test_content_mathml_greek():
+     mml = mp._print(Symbol('alpha'))
+     assert mml.nodeName == 'ci'
+@@ -835,6 +850,27 @@ def test_presentation_symbol():
+     del mml
+ 
+ 
++def test_presentation_indexed():
++    a, b, c = Symbol('a'), Symbol('b'), Symbol('c')
++    indexed = IndexedBase(a)[b]
++    indexed_xml = '<msub><mi>a</mi><mi>b</mi></msub>'
++
++    assert mathml(indexed, printer='presentation') == indexed_xml
++    assert mathml(indexed + x, printer='presentation') == (
++        '<mrow><mi>x</mi><mo>+</mo>' + indexed_xml + '</mrow>')
++    assert mathml(IndexedBase(a)[b, c], printer='presentation') == (
++        '<msub><mi>a</mi><mrow><mi>b</mi><mo>,</mo><mi>c</mi></mrow></msub>')
++    mml = mpp._print(Indexed(Matrix([[1, 2]]), b))
++    assert mml.nodeName == 'msub'
++    matrix = mml.childNodes[0]
++    assert matrix.nodeName == 'mfenced'
++    assert matrix.getAttribute('open') == '['
++    assert matrix.getAttribute('close') == ']'
++    assert matrix.childNodes[0].nodeName == 'mtable'
++    assert mml.childNodes[1].nodeName == 'mi'
++    assert mml.childNodes[1].childNodes[0].nodeValue == 'b'
++
++
+ def test_presentation_mathml_greek():
+     mml = mpp._print(Symbol('alpha'))
+     assert mml.nodeName == 'mi'

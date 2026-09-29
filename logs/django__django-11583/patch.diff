@@ -1,0 +1,65 @@
+diff --git a/django/utils/autoreload.py b/django/utils/autoreload.py
+index 25c3b44..0e15634 100644
+--- a/django/utils/autoreload.py
++++ b/django/utils/autoreload.py
+@@ -143,6 +143,9 @@ def iter_modules_and_files(modules, extra_files):
+             # The module could have been removed, don't fail loudly if this
+             # is the case.
+             continue
++        except ValueError:
++            # The path may contain null bytes, which pathlib can't resolve.
++            continue
+         results.add(resolved_path)
+     return frozenset(results)
+ 
+diff --git a/tests/utils_tests/test_autoreload.py b/tests/utils_tests/test_autoreload.py
+index 1ea019a..15e4cb6 100644
+--- a/tests/utils_tests/test_autoreload.py
++++ b/tests/utils_tests/test_autoreload.py
+@@ -10,6 +10,7 @@ import types
+ import weakref
+ import zipfile
+ from importlib import import_module
++from importlib.util import spec_from_file_location
+ from pathlib import Path
+ from unittest import mock, skip, skipIf
+ 
+@@ -140,6 +141,38 @@ class TestIterModulesAndFiles(SimpleTestCase):
+         fake_main = types.ModuleType('__main__')
+         self.assertEqual(autoreload.iter_modules_and_files((fake_main,), frozenset()), frozenset())
+ 
++    def test_main_module_with_null_byte_in_file_is_not_resolved(self):
++        fake_main = types.ModuleType('__main__')
++        fake_main.__file__ = 'bad\x00name.py'
++        self.assertEqual(autoreload.iter_modules_and_files((fake_main,), frozenset()), frozenset())
++
++    @skipIf(os.name == 'nt', 'Path.resolve() uses readlink only on POSIX.')
++    def test_readlink_value_error_skips_path_and_keeps_other_module(self):
++        bad_file = self.temporary_file('bad.py')
++        target_file = self.temporary_file('target.py')
++        good_file = self.temporary_file('good.py')
++        for filename in (target_file, good_file):
++            filename.touch()
++        bad_file.symlink_to(target_file)
++
++        bad_module = types.ModuleType('bad_module')
++        bad_module.__spec__ = spec_from_file_location('bad_module', str(bad_file))
++        good_module = types.ModuleType('good_module')
++        good_module.__spec__ = spec_from_file_location('good_module', str(good_file))
++
++        real_readlink = os.readlink
++
++        def readlink(path):
++            if path == str(bad_file):
++                raise ValueError('embedded null byte')
++            return real_readlink(path)
++
++        with mock.patch('django.utils.autoreload.os.readlink', side_effect=readlink) as mocked_readlink:
++            files = autoreload.iter_modules_and_files((bad_module, good_module), frozenset())
++
++        self.assertEqual(files, frozenset({good_file.resolve()}))
++        mocked_readlink.assert_any_call(str(bad_file))
++
+ 
+ class TestCommonRoots(SimpleTestCase):
+     def test_common_roots(self):

@@ -1,0 +1,41 @@
+diff --git a/sympy/core/expr.py b/sympy/core/expr.py
+index 24d8989..b1e85ea 100644
+--- a/sympy/core/expr.py
++++ b/sympy/core/expr.py
+@@ -121,7 +121,7 @@ def _hashable_content(self):
+ 
+     def __eq__(self, other):
+         try:
+-            other = sympify(other)
++            other = _sympify(other)
+             if not isinstance(other, Expr):
+                 return False
+         except (SympifyError, SyntaxError):
+diff --git a/sympy/core/tests/test_equal.py b/sympy/core/tests/test_equal.py
+index 1ec1646..5d6420b 100644
+--- a/sympy/core/tests/test_equal.py
++++ b/sympy/core/tests/test_equal.py
+@@ -46,11 +46,23 @@ def test_cmp_bug1():
+     class T(object):
+         pass
+ 
++    class Dotted(object):
++        def __repr__(self):
++            return 'x.y'
++
++    class Matching(object):
++        def __repr__(self):
++            return 'x'
++
+     t = T()
+     x = Symbol("x")
+ 
+     assert not (x == t)
+     assert (x != t)
++    assert (x == Dotted()) is False
++    assert (x != Dotted()) is True
++    assert (x == Matching()) is False
++    assert (x != Matching()) is True
+ 
+ 
+ def test_cmp_bug2():

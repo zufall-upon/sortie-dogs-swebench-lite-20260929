@@ -1,0 +1,64 @@
+diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py
+index c6cfc12..d15855e 100644
+--- a/sympy/core/numbers.py
++++ b/sympy/core/numbers.py
+@@ -1679,8 +1679,8 @@ def _eval_power(self, expt):
+                     return Rational(self.q, self.p)
+                 if self.is_negative:
+                     if expt.q != 1:
+-                        return -(S.NegativeOne)**((expt.p % expt.q) /
+-                               S(expt.q))*Rational(self.q, -self.p)**ne
++                        return S.NegativeOne**expt*Rational(
++                            self.q, -self.p)**ne
+                     else:
+                         return S.NegativeOne**ne*Rational(self.q, -self.p)**ne
+                 else:
+@@ -2224,8 +2224,7 @@ def _eval_power(self, expt):
+             ne = -expt
+             if self.is_negative:
+                 if expt.q != 1:
+-                    return -(S.NegativeOne)**((expt.p % expt.q) /
+-                            S(expt.q))*Rational(1, -self)**ne
++                    return S.NegativeOne**expt*Rational(1, -self)**ne
+                 else:
+                     return (S.NegativeOne)**ne*Rational(1, -self)**ne
+             else:
+diff --git a/sympy/core/tests/test_numbers.py b/sympy/core/tests/test_numbers.py
+index 5010a5b..199149b 100644
+--- a/sympy/core/tests/test_numbers.py
++++ b/sympy/core/tests/test_numbers.py
+@@ -1022,6 +1022,8 @@ def test_powers_Integer():
+         -(-1)**Rational(2, 3)*3**Rational(2, 3)/27
+     assert (-3) ** Rational(-2, 3) == \
+         -(-1)**Rational(1, 3)*3**Rational(1, 3)/3
++    assert (-2) ** Rational(-10, 3) == \
++        (-1)**Rational(-10, 3)*2**Rational(-10, 3)
+ 
+     # join roots
+     assert sqrt(6) + sqrt(24) == 3*sqrt(6)
+@@ -1121,6 +1123,8 @@ def test_powers_Rational():
+         -4*(-1)**Rational(2, 3)*2**Rational(1, 3)*3**Rational(2, 3)/27
+     assert Rational(-3, 2)**Rational(-2, 3) == \
+         -(-1)**Rational(1, 3)*2**Rational(2, 3)*3**Rational(1, 3)/3
++    assert Rational(-2, 3)**Rational(-10, 3) == \
++        (-1)**Rational(-10, 3)*Rational(2, 3)**Rational(-10, 3)
+ 
+     # negative integer power and negative rational base
+     assert Rational(-2, 3) ** Rational(-2, 1) == Rational(9, 4)
+@@ -1229,6 +1233,16 @@ def test_issue_13890():
+     assert abs(e.subs(x,a).evalf() - f.subs(x,a).evalf()) < 1e-15
+ 
+ 
++def test_issue_14024():
++    x = Symbol('x')
++    t = -S(10)/3
++    for a in (Symbol('a', integer=True, positive=True), S(2)):
++        e = (-a)**x*a**(-x)
++        f = simplify(e)
++        assert abs(complex(e.subs(x, t).evalf() -
++                           f.subs(x, t).evalf())) < 1e-12
++
++
+ def test_Integer_factors():
+     def F(i):
+         return Integer(i).factors()

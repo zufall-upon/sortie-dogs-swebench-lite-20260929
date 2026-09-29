@@ -1,0 +1,125 @@
+diff --git a/src/flask/cli.py b/src/flask/cli.py
+index 37a15ff..ba6f74e 100644
+--- a/src/flask/cli.py
++++ b/src/flask/cli.py
+@@ -1017,21 +1017,35 @@ def routes_command(sort: str, all_methods: bool) -> None:
+         ", ".join(sorted(rule.methods - ignored_methods))  # type: ignore
+         for rule in rules
+     ]
++    adapter = current_app.create_url_adapter(None)
++    rule_hosts = [
++        rule.host or (adapter.get_host(rule.subdomain) if adapter is not None else "")
++        for rule in rules
++    ]
++    rule_subdomains = [rule.subdomain or "" for rule in rules]
+ 
+-    headers = ("Endpoint", "Methods", "Rule")
++    headers = ("Endpoint", "Methods", "Host", "Subdomain", "Rule")
+     widths = (
+         max(len(rule.endpoint) for rule in rules),
+         max(len(methods) for methods in rule_methods),
++        max(len(host) for host in rule_hosts),
++        max(len(subdomain) for subdomain in rule_subdomains),
+         max(len(rule.rule) for rule in rules),
+     )
+     widths = [max(len(h), w) for h, w in zip(headers, widths)]
+-    row = "{{0:<{0}}}  {{1:<{1}}}  {{2:<{2}}}".format(*widths)
++    row = "{{0:<{0}}}  {{1:<{1}}}  {{2:<{2}}}  {{3:<{3}}}  {{4:<{4}}}".format(
++        *widths
++    )
+ 
+     click.echo(row.format(*headers).strip())
+     click.echo(row.format(*("-" * width for width in widths)))
+ 
+-    for rule, methods in zip(rules, rule_methods):
+-        click.echo(row.format(rule.endpoint, methods, rule.rule).rstrip())
++    for rule, methods, host, subdomain in zip(
++        rules, rule_methods, rule_hosts, rule_subdomains
++    ):
++        click.echo(
++            row.format(rule.endpoint, methods, host, subdomain, rule.rule).rstrip()
++        )
+ 
+ 
+ cli = FlaskGroup(
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 0d9625b..e1965ac 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -472,6 +472,76 @@ class TestRoutes:
+         assert result.exit_code == 0
+         self.expect_order(["aaa_post", "static", "yyy_get_post"], result.output)
+ 
++    @pytest.mark.parametrize(
++        ("server_name", "hosts"),
++        (
++            ("test.local", ["admin.test.local", "test.local", "test.test.local"]),
++            (None, ["", "", ""]),
++        ),
++    )
++    def test_subdomains(self, runner, server_name, hosts):
++        app = Flask(__name__, subdomain_matching=True)
++        app.config["SERVER_NAME"] = server_name
++        admin = Blueprint("admin", __name__)
++        test = Blueprint("test", __name__)
++
++        @admin.route("/home")
++        def home():
++            return "admin"
++
++        @test.route("/home")
++        def home():
++            return "test"
++
++        app.register_blueprint(admin, subdomain="admin")
++        app.register_blueprint(test, subdomain="test")
++
++        cli = FlaskGroup(create_app=lambda: app)
++        result = runner.invoke(cli, ["routes"])
++        assert result.exit_code == 0
++
++        lines = result.output.splitlines()
++        headers = ("Endpoint", "Methods", "Host", "Subdomain", "Rule")
++        starts = [lines[0].index(header) for header in headers]
++        rows = [
++            [
++                line[start:end].strip()
++                for start, end in zip(starts, starts[1:] + [None])
++            ]
++            for line in lines[2:]
++        ]
++        assert rows == [
++            ["admin.home", "GET", hosts[0], "admin", "/home"],
++            ["static", "GET", hosts[1], "", "/static/<path:filename>"],
++            ["test.home", "GET", hosts[2], "test", "/home"],
++        ]
++
++    def test_hosts(self, runner):
++        app = Flask(__name__, host_matching=True, static_host="test.local")
++
++        @app.route("/status", host="api.test.local")
++        def status():
++            return "ok"
++
++        cli = FlaskGroup(create_app=lambda: app)
++        result = runner.invoke(cli, ["routes"])
++        assert result.exit_code == 0
++
++        lines = result.output.splitlines()
++        headers = ("Endpoint", "Methods", "Host", "Subdomain", "Rule")
++        starts = [lines[0].index(header) for header in headers]
++        rows = [
++            [
++                line[start:end].strip()
++                for start, end in zip(starts, starts[1:] + [None])
++            ]
++            for line in lines[2:]
++        ]
++        assert rows == [
++            ["static", "GET", "test.local", "", "/static/<path:filename>"],
++            ["status", "GET", "api.test.local", "", "/status"],
++        ]
++
+     def test_sort(self, app, invoke):
+         default_output = invoke(["routes"]).output
+         endpoint_output = invoke(["routes", "-s", "endpoint"]).output

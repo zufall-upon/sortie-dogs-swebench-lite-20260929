@@ -1,0 +1,130 @@
+diff --git a/django/db/migrations/operations/models.py b/django/db/migrations/operations/models.py
+index 982816b..f716e0e 100644
+--- a/django/db/migrations/operations/models.py
++++ b/django/db/migrations/operations/models.py
+@@ -321,13 +321,20 @@ class RenameModel(ModelOperation):
+         if self.allow_migrate_model(schema_editor.connection.alias, new_model):
+             old_model = from_state.apps.get_model(app_label, self.old_name)
+             # Move the main table
+-            schema_editor.alter_db_table(
+-                new_model,
+-                old_model._meta.db_table,
+-                new_model._meta.db_table,
+-            )
++            same_db_table = old_model._meta.db_table == new_model._meta.db_table
++            if not same_db_table:
++                schema_editor.alter_db_table(
++                    new_model,
++                    old_model._meta.db_table,
++                    new_model._meta.db_table,
++                )
+             # Alter the fields pointing to us
+             for related_object in old_model._meta.related_objects:
++                # Foreign keys still point to the same table. In particular,
++                # avoid rebuilding referencing tables on SQLite. M2M fields
++                # may need changes to their intermediary table columns.
++                if same_db_table and not related_object.field.many_to_many:
++                    continue
+                 if related_object.related_model == old_model:
+                     model = new_model
+                     related_key = (app_label, self.new_name_lower)
+diff --git a/tests/migrations/test_operations.py b/tests/migrations/test_operations.py
+index 11961a1..c03eb02 100644
+--- a/tests/migrations/test_operations.py
++++ b/tests/migrations/test_operations.py
+@@ -651,6 +651,95 @@ class OperationTests(OperationTestBase):
+         self.assertEqual(definition[1], [])
+         self.assertEqual(definition[2], {'old_name': "Pony", 'new_name': "Horse"})
+ 
++    def test_rename_model_with_db_table(self):
++        app_label = 'test_rename_model_with_db_table'
++        db_table = 'custom_pony'
++        project_state = self.set_up_test_model(app_label, related_model=True, db_table=db_table)
++        new_state = project_state.clone()
++        operation = migrations.RenameModel('Pony', 'Horse')
++        operation.state_forwards(app_label, new_state)
++
++        self.assertNotIn((app_label, 'pony'), new_state.models)
++        self.assertIn((app_label, 'horse'), new_state.models)
++        self.assertEqual(new_state.models[app_label, 'horse'].options['db_table'], db_table)
++        self.assertEqual(
++            new_state.models[app_label, 'rider'].fields['pony'].remote_field.model,
++            '%s.Horse' % app_label,
++        )
++        self.assertTableExists(db_table)
++        self.assertTableExists('%s_rider' % app_label)
++        if connection.features.supports_foreign_keys:
++            self.assertFKExists('%s_rider' % app_label, ['pony_id'], (db_table, 'id'))
++
++        atomic_rename = connection.features.supports_atomic_references_rename
++        with connection.schema_editor(atomic=atomic_rename) as editor:
++            with CaptureQueriesContext(connection) as queries:
++                operation.database_forwards(app_label, editor, project_state, new_state)
++        self.assertEqual(queries.captured_queries, [])
++        self.assertTableExists(db_table)
++        self.assertTableExists('%s_rider' % app_label)
++        if connection.features.supports_foreign_keys:
++            self.assertFKExists('%s_rider' % app_label, ['pony_id'], (db_table, 'id'))
++
++        backward_state = new_state.clone()
++        migrations.RenameModel('Horse', 'Pony').state_forwards(app_label, backward_state)
++        self.assertIn((app_label, 'pony'), backward_state.models)
++        self.assertNotIn((app_label, 'horse'), backward_state.models)
++        self.assertEqual(
++            backward_state.models[app_label, 'rider'].fields['pony'].remote_field.model,
++            '%s.Pony' % app_label,
++        )
++        with connection.schema_editor(atomic=atomic_rename) as editor:
++            with CaptureQueriesContext(connection) as queries:
++                operation.database_backwards(app_label, editor, new_state, project_state)
++        self.assertEqual(queries.captured_queries, [])
++        self.assertTableExists(db_table)
++        self.assertTableExists('%s_rider' % app_label)
++        if connection.features.supports_foreign_keys:
++            self.assertFKExists('%s_rider' % app_label, ['pony_id'], (db_table, 'id'))
++
++    def test_rename_model_with_db_table_and_m2m(self):
++        app_label = 'test_rename_model_with_db_table_m2m'
++        db_table = 'custom_pony'
++        project_state = self.apply_operations(app_label, ProjectState(), operations=[
++            migrations.CreateModel(
++                'Pony',
++                [('id', models.AutoField(primary_key=True))],
++                options={'db_table': db_table},
++            ),
++            migrations.CreateModel(
++                'Rider',
++                [
++                    ('id', models.AutoField(primary_key=True)),
++                    ('ponies', models.ManyToManyField('Pony')),
++                ],
++            ),
++        ])
++        Pony = project_state.apps.get_model(app_label, 'Pony')
++        Rider = project_state.apps.get_model(app_label, 'Rider')
++        pony = Pony.objects.create()
++        rider = Rider.objects.create()
++        rider.ponies.add(pony)
++
++        operation = migrations.RenameModel('Pony', 'Horse')
++        new_state = project_state.clone()
++        operation.state_forwards(app_label, new_state)
++        m2m_table = '%s_rider_ponies' % app_label
++        self.assertColumnExists(m2m_table, 'pony_id')
++        with connection.schema_editor(atomic=connection.features.supports_atomic_references_rename) as editor:
++            operation.database_forwards(app_label, editor, project_state, new_state)
++        self.assertColumnExists(m2m_table, 'horse_id')
++        self.assertColumnNotExists(m2m_table, 'pony_id')
++        Rider = new_state.apps.get_model(app_label, 'Rider')
++        self.assertEqual(Rider.objects.get().ponies.count(), 1)
++
++        with connection.schema_editor(atomic=connection.features.supports_atomic_references_rename) as editor:
++            operation.database_backwards(app_label, editor, new_state, project_state)
++        self.assertColumnExists(m2m_table, 'pony_id')
++        self.assertColumnNotExists(m2m_table, 'horse_id')
++        Rider = project_state.apps.get_model(app_label, 'Rider')
++        self.assertEqual(Rider.objects.get().ponies.count(), 1)
++
+     def test_rename_model_state_forwards(self):
+         """
+         RenameModel operations shouldn't trigger the caching of rendered apps

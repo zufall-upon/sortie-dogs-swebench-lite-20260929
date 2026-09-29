@@ -1,0 +1,42 @@
+diff --git a/sklearn/utils/tests/test_validation.py b/sklearn/utils/tests/test_validation.py
+index 00182fa..b3af128 100644
+--- a/sklearn/utils/tests/test_validation.py
++++ b/sklearn/utils/tests/test_validation.py
+@@ -338,6 +338,20 @@ def test_check_array_pandas_dtype_object_conversion():
+     assert_equal(check_array(X_df, ensure_2d=False).dtype.kind, "f")
+ 
+ 
++def test_check_array_pandas_dtype_object_conversion_warn_on_dtype():
++    try:
++        import pandas as pd
++    except ImportError:
++        raise SkipTest("Pandas not found")
++
++    X = pd.DataFrame([[1, 2, 3], [2, 3, 4]], dtype=np.object)
++    X_checked = assert_warns_message(
++        DataConversionWarning,
++        "input dtype object was converted to float64",
++        check_array, X, warn_on_dtype=True)
++    assert_equal(X_checked.dtype, np.float64)
++
++
+ def test_check_array_on_mock_dataframe():
+     arr = np.array([[0.2, 0.7], [0.6, 0.5], [0.4, 0.1], [0.7, 0.2]])
+     mock_df = MockDataFrame(arr)
+diff --git a/sklearn/utils/validation.py b/sklearn/utils/validation.py
+index fe1f723..3f9b1c5 100644
+--- a/sklearn/utils/validation.py
++++ b/sklearn/utils/validation.py
+@@ -464,7 +464,11 @@ def check_array(array, accept_sparse=False, accept_large_sparse=True,
+     dtype_orig = getattr(array, "dtype", None)
+     if not hasattr(dtype_orig, 'kind'):
+         # not a data type (e.g. a column named dtype in a pandas DataFrame)
+-        dtype_orig = None
++        if hasattr(array, "dtypes"):
++            array_values = getattr(array, "values", None)
++            dtype_orig = getattr(array_values, "dtype", None)
++        if not hasattr(dtype_orig, 'kind'):
++            dtype_orig = None
+ 
+     if dtype_numeric:
+         if dtype_orig is not None and dtype_orig.kind == "O":

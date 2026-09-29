@@ -1,0 +1,38 @@
+diff --git a/sympy/core/function.py b/sympy/core/function.py
+index 69df976..b14145e 100644
+--- a/sympy/core/function.py
++++ b/sympy/core/function.py
+@@ -1666,6 +1666,10 @@ def eval(x):
+                                              z0._to_mpmath(mpmath.mp.prec)),
+                                  mpmath.mp.prec)
+ 
++    @property
++    def kind(self):
++        return self.expr.kind
++
+     @property
+     def expr(self):
+         return self._args[0]
+diff --git a/sympy/core/tests/test_kind.py b/sympy/core/tests/test_kind.py
+index eabf9ad..75d7557 100644
+--- a/sympy/core/tests/test_kind.py
++++ b/sympy/core/tests/test_kind.py
+@@ -1,4 +1,5 @@
+ from sympy.core.add import Add
++from sympy.core.function import Derivative
+ from sympy.core.kind import NumberKind, UndefinedKind
+ from sympy.core.mul import Mul
+ from sympy.core.numbers import pi, zoo, I, AlgebraicNumber
+@@ -39,6 +40,12 @@ def test_Integral_kind():
+     assert Integral(comm_x, comm_x).kind is NumberKind
+     assert Integral(A, comm_x).kind is MatrixKind(NumberKind)
+ 
++def test_Derivative_kind():
++    A = MatrixSymbol('A', 2,2)
++    assert Derivative(comm_x, comm_x).kind is NumberKind
++    assert Derivative(noncomm_x, comm_x).kind is UndefinedKind
++    assert Derivative(A, comm_x).kind == MatrixKind(NumberKind)
++
+ def test_Matrix_kind():
+     classes = (Matrix, SparseMatrix, ImmutableMatrix, ImmutableSparseMatrix)
+     for cls in classes:

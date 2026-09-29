@@ -1,0 +1,71 @@
+diff --git a/sympy/matrices/sparse.py b/sympy/matrices/sparse.py
+index e6f36cd..b1d7ccb 100644
+--- a/sympy/matrices/sparse.py
++++ b/sympy/matrices/sparse.py
+@@ -985,8 +985,10 @@ def col_join(self, other):
+         >>> C == A.row_insert(A.rows, Matrix(B))
+         True
+         """
+-        if not self:
+-            return type(self)(other)
++        if not self and not isinstance(other, MatrixBase):
++            other = type(self)(other)
++        if self.rows == 0 and self.cols != other.cols:
++            return self._new(0, other.cols, {}).col_join(other)
+         A, B = self, other
+         if not A.cols == B.cols:
+             raise ShapeError()
+@@ -1191,8 +1193,10 @@ def row_join(self, other):
+         >>> C == A.col_insert(A.cols, B)
+         True
+         """
+-        if not self:
+-            return type(self)(other)
++        if not self and not isinstance(other, MatrixBase):
++            other = type(self)(other)
++        if self.cols == 0 and self.rows != other.rows:
++            return self._new(other.rows, 0, {}).row_join(other)
+         A, B = self, other
+         if not A.rows == B.rows:
+             raise ShapeError()
+diff --git a/sympy/matrices/tests/test_sparse.py b/sympy/matrices/tests/test_sparse.py
+index acea940..59d6f13 100644
+--- a/sympy/matrices/tests/test_sparse.py
++++ b/sympy/matrices/tests/test_sparse.py
+@@ -449,6 +449,36 @@ def sparse_zeros(n):
+     assert SparseMatrix.eye(2).nnz() == 2
+ 
+ 
++def test_sparse_zero_dimensional_joins():
++    assert SparseMatrix.hstack(
++        SparseMatrix.zeros(0, 0), SparseMatrix.zeros(0, 1),
++        SparseMatrix.zeros(0, 2), SparseMatrix.zeros(0, 3)).shape == (0, 6)
++    assert SparseMatrix.vstack(
++        SparseMatrix.zeros(0, 0), SparseMatrix.zeros(1, 0),
++        SparseMatrix.zeros(2, 0), SparseMatrix.zeros(3, 0)).shape == (6, 0)
++
++    # Empty identity matrices remain usable with matrices of any shape.
++    empty = SparseMatrix.zeros(0, 0)
++    assert empty.row_join(SparseMatrix([[1, 2]])) == SparseMatrix([[1, 2]])
++    assert empty.col_join(SparseMatrix([[1], [2]])) == SparseMatrix([[1], [2]])
++    row = empty.row_join([[1, 2]])
++    assert type(row) is type(empty) and row == SparseMatrix([[1, 2]])
++    col = empty.col_join([[1], [2]])
++    assert type(col) is type(empty) and col == SparseMatrix([[1], [2]])
++
++    # Nonempty matrices still stack normally, and incompatible shapes fail.
++    assert SparseMatrix([[1, 2]]).row_join(SparseMatrix([[3]])) == \
++        SparseMatrix([[1, 2, 3]])
++    assert SparseMatrix([[1, 2]]).col_join(SparseMatrix([[3, 4]])) == \
++        SparseMatrix([[1, 2], [3, 4]])
++    row = SparseMatrix.zeros(1, 1)
++    raises(ShapeError, lambda: row.row_join(SparseMatrix.zeros(2, 1)))
++    assert row.shape == (1, 1) and row == SparseMatrix.zeros(1, 1)
++    col = SparseMatrix.zeros(1, 1)
++    raises(ShapeError, lambda: col.col_join(SparseMatrix.zeros(1, 2)))
++    assert col.shape == (1, 1) and col == SparseMatrix.zeros(1, 1)
++
++
+ def test_transpose():
+     assert SparseMatrix(((1, 2), (3, 4))).transpose() == \
+         SparseMatrix(((1, 3), (2, 4)))

@@ -1,0 +1,44 @@
+diff --git a/sympy/simplify/cse_main.py b/sympy/simplify/cse_main.py
+index d649dd0..f8b5853 100644
+--- a/sympy/simplify/cse_main.py
++++ b/sympy/simplify/cse_main.py
+@@ -586,6 +586,11 @@ def _find_repeated(expr):
+         if isinstance(expr, RootOf):
+             return
+ 
++        if isinstance(expr, MatrixSymbol):
++            # MatrixSymbols have arguments but are leaves for CSE purposes.
++            excluded_symbols.add(expr.args[0])
++            return
++
+         if isinstance(expr, Basic) and (expr.is_Atom or expr.is_Order):
+             if expr.is_Symbol:
+                 excluded_symbols.add(expr)
+diff --git a/sympy/simplify/tests/test_cse.py b/sympy/simplify/tests/test_cse.py
+index eb9cc23..2aaf2bd 100644
+--- a/sympy/simplify/tests/test_cse.py
++++ b/sympy/simplify/tests/test_cse.py
+@@ -347,6 +347,23 @@ def test_cse_MatrixSymbol():
+     B = MatrixSymbol("B", n, n)
+     assert cse(B) == ([], [B])
+ 
++
++def test_cse_MatrixSymbol_indexing():
++    a, b = MatrixSymbol('a', 4, 4), MatrixSymbol('b', 4, 4)
++    A = Matrix(4, 4, lambda i, j: Symbol('a_%d_%d' % (i, j)))
++    B = Matrix(4, 4, lambda i, j: Symbol('b_%d_%d' % (i, j)))
++    expr = A*B
++    for matrix in (a, b):
++        for i in range(4):
++            for j in range(4):
++                expr = expr.subs(
++                    Symbol('%s_%d_%d' % (matrix.name, i, j)), matrix[i, j])
++
++    replacements, reduced_exprs = cse(expr)
++    assert not any(subexpr in (a, b) for _, subexpr in replacements)
++    assert len(reduced_exprs) == 1 and reduced_exprs[0].shape == (4, 4)
++
++
+ def test_cse_MatrixExpr():
+     A = MatrixSymbol('A', 3, 3)
+     y = MatrixSymbol('y', 3, 1)

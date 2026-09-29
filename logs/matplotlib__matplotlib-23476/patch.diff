@@ -1,0 +1,85 @@
+diff --git a/lib/matplotlib/figure.py b/lib/matplotlib/figure.py
+index c558642..e2a8251 100644
+--- a/lib/matplotlib/figure.py
++++ b/lib/matplotlib/figure.py
+@@ -3015,6 +3015,9 @@ class Figure(FigureBase):
+     def __getstate__(self):
+         state = super().__getstate__()
+ 
++        # Preserve the logical DPI; the canvas may have scaled it for HiDPI.
++        state["_original_dpi"] = self.dpi / self.canvas.device_pixel_ratio
++
+         # The canvas cannot currently be pickled, but this has the benefit
+         # of meaning that a figure can be detached from one canvas, and
+         # re-attached to another.
+@@ -3033,6 +3036,7 @@ class Figure(FigureBase):
+         return state
+ 
+     def __setstate__(self, state):
++        original_dpi = state.get('_original_dpi')
+         version = state.pop('__mpl_version__')
+         restore_to_pylab = state.pop('_restore_to_pylab', False)
+ 
+@@ -3043,6 +3047,11 @@ class Figure(FigureBase):
+ 
+         self.__dict__ = state
+ 
++        if original_dpi is not None and restore_to_pylab:
++            # The stored DPI may be scaled for a high-DPI canvas.  Undo this
++            # scaling before reattaching the canvas, which will apply it again.
++            self._set_dpi(original_dpi, forward=False)
++
+         # re-initialise some of the unstored state information
+         FigureCanvasBase(self)  # Set self.canvas.
+ 
+diff --git a/lib/matplotlib/tests/test_pickle.py b/lib/matplotlib/tests/test_pickle.py
+index 0d0a5e5..724c145 100644
+--- a/lib/matplotlib/tests/test_pickle.py
++++ b/lib/matplotlib/tests/test_pickle.py
+@@ -209,12 +209,46 @@ def test_cmap(cmap):
+ 
+ def test_unpickle_canvas():
+     fig = mfigure.Figure()
++    fig.set_dpi(200)
+     assert fig.canvas is not None
+     out = BytesIO()
+     pickle.dump(fig, out)
+     out.seek(0)
+     fig2 = pickle.load(out)
+     assert fig2.canvas is not None
++    assert fig2.dpi == 200
++
++
++def test_unmanaged_hidpi_unpickle_dpi():
++    fig = mfigure.Figure(dpi=100)
++    fig.canvas._set_device_pixel_ratio(2)
++    assert fig.dpi == 200
++
++    fig = pickle.loads(pickle.dumps(fig))
++    assert fig.dpi == 200
++
++
++def test_hidpi_unpickle_dpi():
++    from matplotlib.backends.backend_agg import FigureCanvasAgg
++
++    fig = plt.figure(dpi=100)
++    fig.canvas._set_device_pixel_ratio(2)
++    dpi = fig.dpi
++
++    original_init = FigureCanvasAgg.__init__
++
++    def hidpi_init(self, figure):
++        original_init(self, figure)
++        self._set_device_pixel_ratio(2)
++
++    FigureCanvasAgg.__init__ = hidpi_init
++    try:
++        for _ in range(24):
++            fig = pickle.loads(pickle.dumps(fig))
++            assert fig.dpi == dpi
++    finally:
++        FigureCanvasAgg.__init__ = original_init
++        plt.close("all")
+ 
+ 
+ def test_mpl_toolkits():

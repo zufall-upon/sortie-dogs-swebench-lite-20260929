@@ -1,0 +1,157 @@
+diff --git a/requests/models.py b/requests/models.py
+index 0dc5556..11a41fe 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -9,6 +9,7 @@ This module contains the primary objects that power Requests.
+ 
+ import collections
+ import datetime
++import socket
+ 
+ from io import BytesIO, UnsupportedOperation
+ from .hooks import default_hooks
+@@ -19,10 +20,10 @@ from .cookies import cookiejar_from_dict, get_cookie_header
+ from .packages.urllib3.fields import RequestField
+ from .packages.urllib3.filepost import encode_multipart_formdata
+ from .packages.urllib3.util import parse_url
+-from .packages.urllib3.exceptions import DecodeError
++from .packages.urllib3.exceptions import DecodeError, ProtocolError, ReadTimeoutError
+ from .exceptions import (
+     HTTPError, RequestException, MissingSchema, InvalidURL,
+-    ChunkedEncodingError, ContentDecodingError)
++    ChunkedEncodingError, ContentDecodingError, ConnectionError, Timeout)
+ from .utils import (
+     guess_filename, get_auth_from_url, requote_uri,
+     stream_decode_response_unicode, to_key_val_list, parse_header_links,
+@@ -640,10 +641,23 @@ class Response(object):
+                     raise ChunkedEncodingError(e)
+                 except DecodeError as e:
+                     raise ContentDecodingError(e)
++                except ProtocolError as e:
++                    raise ChunkedEncodingError(e)
++                except ReadTimeoutError as e:
++                    raise Timeout(e)
++                except socket.timeout as e:
++                    raise Timeout(e)
++                except socket.error as e:
++                    raise ConnectionError(e)
+             except AttributeError:
+                 # Standard file-like object.
+                 while True:
+-                    chunk = self.raw.read(chunk_size)
++                    try:
++                        chunk = self.raw.read(chunk_size)
++                    except socket.timeout as e:
++                        raise Timeout(e)
++                    except socket.error as e:
++                        raise ConnectionError(e)
+                     if not chunk:
+                         break
+                     yield chunk
+diff --git a/test_requests.py b/test_requests.py
+index 283353b..8e60140 100755
+--- a/test_requests.py
++++ b/test_requests.py
+@@ -11,6 +11,8 @@ import unittest
+ import collections
+ 
+ import io
++import errno
++import socket
+ import requests
+ import pytest
+ from requests.adapters import HTTPAdapter
+@@ -24,6 +26,7 @@ from requests.structures import CaseInsensitiveDict
+ from requests.sessions import SessionRedirectMixin
+ from requests.models import urlencode
+ from requests.hooks import default_hooks
++from requests.packages.urllib3.exceptions import ProtocolError, ReadTimeoutError
+ 
+ try:
+     import StringIO
+@@ -720,6 +723,85 @@ class RequestsTestCase(unittest.TestCase):
+         assert next(iter(r))
+         io.close()
+ 
++    def test_response_socket_reset(self):
++        def response_with_socket_reset():
++            response = requests.Response()
++
++            def stream(*args, **kwargs):
++                raise socket.error(errno.ECONNRESET, 'Connection reset by peer')
++
++            response.raw = type('Raw', (), {'stream': stream})()
++            return response
++
++        response = response_with_socket_reset()
++        with pytest.raises(requests.exceptions.ConnectionError) as exc:
++            response.text
++        assert exc.value.args[0].errno == errno.ECONNRESET
++        assert response._content is False
++        assert response._content_consumed is False
++
++        response = response_with_socket_reset()
++        with pytest.raises(requests.exceptions.ConnectionError):
++            list(response.iter_content())
++        assert response._content is False
++        assert response._content_consumed is False
++
++    def test_response_stream_exception_mapping(self):
++        failures = [
++            (ProtocolError('Connection broken'),
++             requests.exceptions.ChunkedEncodingError),
++            (ReadTimeoutError(None, None, 'Read timed out.'),
++             requests.exceptions.Timeout),
++            (socket.timeout('timed out'), requests.exceptions.Timeout),
++        ]
++
++        for failure, expected_exception in failures:
++            response = requests.Response()
++
++            def stream(*args, **kwargs):
++                raise failure
++
++            response.raw = type('Raw', (), {'stream': stream})()
++            with pytest.raises(expected_exception):
++                list(response.iter_content())
++
++    def test_response_file_like_socket_reset(self):
++        def response_with_socket_reset():
++            response = requests.Response()
++
++            def read(*args, **kwargs):
++                raise socket.error(errno.ECONNRESET, 'Connection reset by peer')
++
++            response.raw = type('Raw', (), {'read': read})()
++            return response
++
++        response = response_with_socket_reset()
++        with pytest.raises(requests.exceptions.ConnectionError) as exc:
++            response.text
++        assert exc.value.args[0].errno == errno.ECONNRESET
++        assert response._content is False
++        assert response._content_consumed is False
++
++        response = response_with_socket_reset()
++        with pytest.raises(requests.exceptions.ConnectionError) as exc:
++            list(response.iter_content())
++        assert exc.value.args[0].errno == errno.ECONNRESET
++        assert response._content is False
++        assert response._content_consumed is False
++
++    def test_response_file_like_timeout(self):
++        response = requests.Response()
++
++        def read(*args, **kwargs):
++            raise socket.timeout('timed out')
++
++        response.raw = type('Raw', (), {'read': read})()
++        with pytest.raises(requests.exceptions.Timeout) as exc:
++            list(response.iter_content())
++        assert isinstance(exc.value.args[0], socket.timeout)
++        assert response._content is False
++        assert response._content_consumed is False
++
+     def test_response_decode_unicode(self):
+         """
+         When called with decode_unicode, Response.iter_content should always

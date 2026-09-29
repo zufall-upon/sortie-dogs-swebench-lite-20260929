@@ -1,0 +1,58 @@
+diff --git a/sympy/functions/elementary/hyperbolic.py b/sympy/functions/elementary/hyperbolic.py
+index 892e19c..796a9ac 100644
+--- a/sympy/functions/elementary/hyperbolic.py
++++ b/sympy/functions/elementary/hyperbolic.py
+@@ -16,6 +16,11 @@ def _rewrite_hyperbolics_as_exp(expr):
+         for h in expr.atoms(HyperbolicFunction)})
+ 
+ 
++def _is_undetermined_acos(arg):
++    from sympy.functions.elementary.trigonometric import acos
++    return arg.func is acos and arg.is_extended_real is None
++
++
+ ###############################################################################
+ ########################### HYPERBOLIC FUNCTIONS ##############################
+ ###############################################################################
+@@ -430,6 +435,8 @@ def _eval_is_real(self):
+         # `cosh(x)` is real for real OR purely imaginary `x`
+         if arg.is_real or arg.is_imaginary:
+             return True
++        if _is_undetermined_acos(arg):
++            return
+ 
+         # cosh(a+ib) = cos(b)*cosh(a) + i*sin(b)*sinh(a)
+         # the imaginary part can be an expression like n*pi
+@@ -444,6 +451,8 @@ def _eval_is_positive(self):
+         # Case 1 (y=n*pi): cosh(z) = (-1)**n * cosh(x) -> positive for n even
+         # Case 2 (x=0): cosh(z) = cos(y) -> positive when cos(y) is positive
+         z = self.args[0]
++        if _is_undetermined_acos(z):
++            return
+ 
+         x, y = z.as_real_imag()
+         ymod = y % (2*pi)
+@@ -471,6 +480,8 @@ def _eval_is_positive(self):
+ 
+     def _eval_is_nonnegative(self):
+         z = self.args[0]
++        if _is_undetermined_acos(z):
++            return
+ 
+         x, y = z.as_real_imag()
+         ymod = y % (2*pi)
+diff --git a/sympy/functions/elementary/tests/test_hyperbolic.py b/sympy/functions/elementary/tests/test_hyperbolic.py
+index 24c2fae..65361ee 100644
+--- a/sympy/functions/elementary/tests/test_hyperbolic.py
++++ b/sympy/functions/elementary/tests/test_hyperbolic.py
+@@ -97,6 +97,10 @@ def test_cosh():
+ 
+     k = Symbol('k', integer=True)
+ 
++    from sympy import sympify
++    expr = sympify('cosh(acos(-i + acosh(-g + i)))')
++    assert expr.is_zero is None
++
+     assert cosh(nan) is nan
+     assert cosh(zoo) is nan
+ 

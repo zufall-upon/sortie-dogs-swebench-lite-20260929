@@ -1,0 +1,93 @@
+diff --git a/django/core/checks/model_checks.py b/django/core/checks/model_checks.py
+index 5c2266c..d198feb 100644
+--- a/django/core/checks/model_checks.py
++++ b/django/core/checks/model_checks.py
+@@ -4,7 +4,9 @@ from collections import defaultdict
+ from itertools import chain
+ 
+ from django.apps import apps
++from django.conf import settings
+ from django.core.checks import Error, Tags, register
++from django.db import router
+ 
+ 
+ @register(Tags.models)
+@@ -19,7 +21,7 @@ def check_all_models(app_configs=None, **kwargs):
+         models = chain.from_iterable(app_config.get_models() for app_config in app_configs)
+     for model in models:
+         if model._meta.managed and not model._meta.proxy:
+-            db_table_models[model._meta.db_table].append(model._meta.label)
++            db_table_models[model._meta.db_table].append(model)
+         if not inspect.ismethod(model.check):
+             errors.append(
+                 Error(
+@@ -35,12 +37,26 @@ def check_all_models(app_configs=None, **kwargs):
+             indexes[model_index.name].append(model._meta.label)
+         for model_constraint in model._meta.constraints:
+             constraints[model_constraint.name].append(model._meta.label)
+-    for db_table, model_labels in db_table_models.items():
+-        if len(model_labels) != 1:
++    for db_table, table_models in db_table_models.items():
++        if len(table_models) < 2:
++            continue
++        colliding_models = set()
++        for db in settings.DATABASES:
++            models_on_db = [
++                model for model in table_models
++                if router.allow_migrate_model(db, model)
++            ]
++            if len(models_on_db) > 1:
++                colliding_models.update(models_on_db)
++        if len(colliding_models) > 1:
++            model_labels = [
++                model._meta.label for model in table_models
++                if model in colliding_models
++            ]
+             errors.append(
+                 Error(
+                     "db_table '%s' is used by multiple models: %s."
+-                    % (db_table, ', '.join(db_table_models[db_table])),
++                    % (db_table, ', '.join(model_labels)),
+                     obj=db_table,
+                     id='models.E028',
+                 )
+diff --git a/tests/check_framework/test_model_checks.py b/tests/check_framework/test_model_checks.py
+index 79177e3..547af36 100644
+--- a/tests/check_framework/test_model_checks.py
++++ b/tests/check_framework/test_model_checks.py
+@@ -3,7 +3,7 @@ from django.core.checks import Error
+ from django.db import models
+ from django.test import SimpleTestCase, TestCase, skipUnlessDBFeature
+ from django.test.utils import (
+-    isolate_apps, modify_settings, override_system_checks,
++    isolate_apps, modify_settings, override_settings, override_system_checks,
+ )
+ 
+ 
+@@ -50,6 +50,26 @@ class DuplicateDBTableTests(SimpleTestCase):
+             )
+         ])
+ 
++    @modify_settings(INSTALLED_APPS={'append': 'basic'})
++    @isolate_apps('basic', 'check_framework', kwarg_name='apps')
++    def test_no_collision_across_databases(self, apps):
++        class Router:
++            def allow_migrate(self, db, app_label, **hints):
++                return db == ('default' if app_label == 'basic' else 'other')
++
++        with override_settings(DATABASE_ROUTERS=[Router()]):
++            class Base(models.Model):
++                class Meta:
++                    app_label = 'basic'
++                    db_table = 'table_name'
++
++            class App2(models.Model):
++                class Meta:
++                    app_label = 'check_framework'
++                    db_table = 'table_name'
++
++            self.assertEqual(checks.run_checks(app_configs=apps.get_app_configs()), [])
++
+     def test_no_collision_for_unmanaged_models(self):
+         class Unmanaged(models.Model):
+             class Meta:

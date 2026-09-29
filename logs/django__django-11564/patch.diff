@@ -1,0 +1,171 @@
+diff --git a/django/contrib/staticfiles/storage.py b/django/contrib/staticfiles/storage.py
+index ba3b626..7a00ace 100644
+--- a/django/contrib/staticfiles/storage.py
++++ b/django/contrib/staticfiles/storage.py
+@@ -23,6 +23,7 @@ class StaticFilesStorage(FileSystemStorage):
+     def __init__(self, location=None, base_url=None, *args, **kwargs):
+         if location is None:
+             location = settings.STATIC_ROOT
++        self._uses_default_base_url = base_url is None
+         if base_url is None:
+             base_url = settings.STATIC_URL
+         check_settings(base_url)
+diff --git a/django/core/files/storage.py b/django/core/files/storage.py
+index 4c27fce..dd15d23 100644
+--- a/django/core/files/storage.py
++++ b/django/core/files/storage.py
+@@ -327,12 +327,17 @@ class FileSystemStorage(Storage):
+         return os.path.getsize(self.path(name))
+ 
+     def url(self, name):
+-        if self.base_url is None:
++        base_url = self.base_url
++        if base_url is None:
+             raise ValueError("This file is not accessible via a URL.")
++        if self._base_url is None or getattr(self, '_uses_default_base_url', False):
++            if base_url.startswith('/') and not base_url.startswith('//'):
++                from django.urls import get_script_prefix
++                base_url = urljoin(get_script_prefix(), base_url.lstrip('/'))
+         url = filepath_to_uri(name)
+         if url is not None:
+             url = url.lstrip('/')
+-        return urljoin(self.base_url, url)
++        return urljoin(base_url, url)
+ 
+     def _datetime_from_timestamp(self, ts):
+         """
+diff --git a/django/templatetags/static.py b/django/templatetags/static.py
+index 39712aa..2e5c1e4 100644
+--- a/django/templatetags/static.py
++++ b/django/templatetags/static.py
+@@ -44,6 +44,9 @@ class PrefixNode(template.Node):
+             prefix = ''
+         else:
+             prefix = iri_to_uri(getattr(settings, name, ''))
++            if prefix.startswith('/') and not prefix.startswith('//'):
++                from django.urls import get_script_prefix
++                prefix = iri_to_uri(urljoin(get_script_prefix(), prefix.lstrip('/')))
+         return prefix
+ 
+     def render(self, context):
+diff --git a/tests/file_storage/tests.py b/tests/file_storage/tests.py
+index 1c41760..38ac85c 100644
+--- a/tests/file_storage/tests.py
++++ b/tests/file_storage/tests.py
+@@ -20,7 +20,7 @@ from django.db.models.fields.files import FileDescriptor
+ from django.test import (
+     LiveServerTestCase, SimpleTestCase, TestCase, override_settings,
+ )
+-from django.test.utils import requires_tz_support
++from django.test.utils import override_script_prefix, requires_tz_support
+ from django.urls import NoReverseMatch, reverse_lazy
+ from django.utils import timezone
+ 
+@@ -86,6 +86,29 @@ class FileSystemStorageTests(unittest.TestCase):
+             storage.url(storage.base_url)
+ 
+ 
++class FileSystemStorageURLTests(SimpleTestCase):
++    @override_settings(MEDIA_URL='/media/')
++    def test_default_base_url_with_script_prefix(self):
++        storage = FileSystemStorage()
++        with override_script_prefix('/tenant/'):
++            self.assertEqual(storage.url('test.file'), '/tenant/media/test.file')
++        with override_script_prefix('/another/'):
++            self.assertEqual(storage.url('test.file'), '/another/media/test.file')
++
++        explicit_storage = FileSystemStorage(base_url='/explicit/')
++        with override_script_prefix('/tenant/'):
++            self.assertEqual(explicit_storage.url('test.file'), '/explicit/test.file')
++
++    def test_default_base_url_without_root_path(self):
++        storage = FileSystemStorage()
++        with self.settings(MEDIA_URL='https://cdn.example.com/media/'):
++            with override_script_prefix('/tenant/'):
++                self.assertEqual(storage.url('test.file'), 'https://cdn.example.com/media/test.file')
++        with self.settings(MEDIA_URL='media/'):
++            with override_script_prefix('/tenant/'):
++                self.assertEqual(storage.url('test.file'), 'media/test.file')
++
++
+ class FileStorageTests(SimpleTestCase):
+     storage_class = FileSystemStorage
+ 
+diff --git a/tests/staticfiles_tests/test_storage.py b/tests/staticfiles_tests/test_storage.py
+index afdf4c1..37463fc 100644
+--- a/tests/staticfiles_tests/test_storage.py
++++ b/tests/staticfiles_tests/test_storage.py
+@@ -12,7 +12,8 @@ from django.contrib.staticfiles.management.commands.collectstatic import (
+     Command as CollectstaticCommand,
+ )
+ from django.core.management import call_command
+-from django.test import override_settings
++from django.test import SimpleTestCase, override_settings
++from django.test.utils import override_script_prefix
+ 
+ from .cases import CollectionTestCase
+ from .settings import TEST_ROOT
+@@ -23,6 +24,20 @@ def hashed_file_path(test, path):
+     return fullpath.replace(settings.STATIC_URL, '')
+ 
+ 
++class StaticFilesStorageURLTests(SimpleTestCase):
++    @override_settings(STATIC_URL='/static/')
++    def test_url_uses_current_script_prefix(self):
++        default_storage = storage.StaticFilesStorage()
++        with override_script_prefix('/tenant/'):
++            self.assertEqual(default_storage.url('a.css'), '/tenant/static/a.css')
++        with override_script_prefix('/another/'):
++            self.assertEqual(default_storage.url('a.css'), '/another/static/a.css')
++
++        explicit_storage = storage.StaticFilesStorage(base_url='/explicit/')
++        with override_script_prefix('/tenant/'):
++            self.assertEqual(explicit_storage.url('a.css'), '/explicit/a.css')
++
++
+ class TestHashedFiles:
+     hashed_file_path = hashed_file_path
+ 
+diff --git a/tests/template_tests/syntax_tests/test_static.py b/tests/template_tests/syntax_tests/test_static.py
+index 00f8cdb..3ed17c2 100644
+--- a/tests/template_tests/syntax_tests/test_static.py
++++ b/tests/template_tests/syntax_tests/test_static.py
+@@ -3,6 +3,7 @@ from urllib.parse import urljoin
+ from django.conf import settings
+ from django.template import TemplateSyntaxError
+ from django.test import SimpleTestCase, override_settings
++from django.test.utils import override_script_prefix
+ 
+ from ..utils import setup
+ 
+@@ -64,6 +65,30 @@ class StaticTagTests(SimpleTestCase):
+         output = self.engine.render_to_string('static-statictag05')
+         self.assertEqual(output, urljoin(settings.STATIC_URL, '/static/special%3Fchars%26quoted.html'))
+ 
++    @setup({'t': '{% load static %}{% get_static_prefix %}|{% get_media_prefix %}|{% static "admin/base.css" %}'})
++    def test_script_prefix(self):
++        with override_script_prefix('/tenant/'):
++            output = self.engine.render_to_string('t')
++        self.assertEqual(output, '/tenant/static/|/tenant/media/|/tenant/static/admin/base.css')
++
++        with override_script_prefix('/another/'):
++            output = self.engine.render_to_string('t')
++        self.assertEqual(output, '/another/static/|/another/media/|/another/static/admin/base.css')
++
++    @setup({'t': '{% load static %}{% static "admin/base.css" %}'})
++    def test_script_prefix_with_staticfiles(self):
++        with self.settings(INSTALLED_APPS=['django.contrib.staticfiles']):
++            with override_script_prefix('/tenant/'):
++                output = self.engine.render_to_string('t')
++        self.assertEqual(output, '/tenant/static/admin/base.css')
++
++    @setup({'t': '{% load static %}{% get_static_prefix %}|{% get_media_prefix %}'})
++    @override_settings(STATIC_URL='https://cdn.example.com/static/', MEDIA_URL='media/')
++    def test_script_prefix_ignored_for_absolute_and_relative_urls(self):
++        with override_script_prefix('/tenant/'):
++            output = self.engine.render_to_string('t')
++        self.assertEqual(output, 'https://cdn.example.com/static/|media/')
++
+     @setup({'t': '{% load static %}{% static %}'})
+     def test_static_statictag_without_path(self):
+         msg = "'static' takes at least one argument (path to file)"

@@ -1,0 +1,78 @@
+diff --git a/sklearn/neighbors/base.py b/sklearn/neighbors/base.py
+index 3e5e729..f172404 100644
+--- a/sklearn/neighbors/base.py
++++ b/sklearn/neighbors/base.py
+@@ -6,6 +6,7 @@
+ #          Multi-output support by Arnaud Joly <a.joly@ulg.ac.be>
+ #
+ # License: BSD 3 clause (C) INRIA, University of Amsterdam
++import numbers
+ import warnings
+ from abc import ABCMeta, abstractmethod
+ 
+@@ -55,6 +56,12 @@ def _check_weights(weights):
+                          "'distance', or a callable function")
+ 
+ 
++def _check_n_neighbors(n_neighbors):
++    if (n_neighbors is not None and
++            not isinstance(n_neighbors, (numbers.Integral, np.integer))):
++        raise ValueError("n_neighbors must be an integer")
++
++
+ def _get_weights(dist, weights):
+     """Get the weights from an array of distances and a parameter ``weights``
+ 
+@@ -155,6 +162,7 @@ class NeighborsBase(six.with_metaclass(ABCMeta, BaseEstimator)):
+             raise ValueError("p must be greater than one for minkowski metric")
+ 
+     def _fit(self, X):
++        _check_n_neighbors(self.n_neighbors)
+         self._check_algorithm_metric()
+         if self.metric_params is None:
+             self.effective_metric_params_ = {}
+@@ -327,6 +335,7 @@ class KNeighborsMixin(object):
+ 
+         if n_neighbors is None:
+             n_neighbors = self.n_neighbors
++        _check_n_neighbors(n_neighbors)
+ 
+         if X is not None:
+             query_is_train = False
+diff --git a/sklearn/neighbors/tests/test_neighbors.py b/sklearn/neighbors/tests/test_neighbors.py
+index 0ecb3b6..a2845e7 100644
+--- a/sklearn/neighbors/tests/test_neighbors.py
++++ b/sklearn/neighbors/tests/test_neighbors.py
+@@ -17,6 +17,7 @@ from sklearn.utils.testing import assert_equal
+ from sklearn.utils.testing import assert_false
+ from sklearn.utils.testing import assert_greater
+ from sklearn.utils.testing import assert_in
++from sklearn.utils.testing import assert_raise_message
+ from sklearn.utils.testing import assert_raises
+ from sklearn.utils.testing import assert_true
+ from sklearn.utils.testing import assert_warns
+@@ -901,6 +902,24 @@ def test_radius_neighbors_graph_sparse(seed=36):
+                                                  mode=mode).toarray())
+ 
+ 
++def test_float_n_neighbors():
++    X = np.random.RandomState(0).random_sample((10, 2))
++    error_message = "n_neighbors must be an integer"
++    bad_nbrs = neighbors.NearestNeighbors(n_neighbors=3.)
++
++    assert_raise_message(
++        ValueError, error_message,
++        bad_nbrs.fit, X)
++    assert_false(hasattr(bad_nbrs, "_fit_method"))
++
++    nbrs = neighbors.NearestNeighbors().fit(X)
++    fit_X = nbrs._fit_X
++    assert_raise_message(ValueError, error_message,
++                         nbrs.kneighbors, X, n_neighbors=3.)
++    assert_true(nbrs._fit_X is fit_X)
++    assert_equal(nbrs.kneighbors(X, n_neighbors=3)[0].shape, (10, 3))
++
++
+ def test_neighbors_badargs():
+     # Test bad argument values: these should all raise ValueErrors
+     assert_raises(ValueError,

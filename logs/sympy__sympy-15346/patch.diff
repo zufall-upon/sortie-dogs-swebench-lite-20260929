@@ -1,0 +1,44 @@
+diff --git a/sympy/simplify/tests/test_trigsimp.py b/sympy/simplify/tests/test_trigsimp.py
+index 644b06d..9e6e85d 100644
+--- a/sympy/simplify/tests/test_trigsimp.py
++++ b/sympy/simplify/tests/test_trigsimp.py
+@@ -1,5 +1,5 @@
+ from sympy import (
+-    symbols, sin, simplify, cos, trigsimp, rad, tan, exptrigsimp,sinh,
++    symbols, sin, simplify, cos, acos, trigsimp, rad, tan, exptrigsimp,sinh,
+     cosh, diff, cot, Subs, exp, tanh, exp, S, integrate, I,Matrix,
+     Symbol, coth, pi, log, count_ops, sqrt, E, expand, Piecewise)
+ 
+@@ -152,6 +152,18 @@ def test_issue_3210():
+         ]
+ 
+ 
++def test_trigsimp_rational_angles():
++    a = S(1)/50
++    b = S(1)/25
++    expr = sin(a)*sin(b) + cos(a)*cos(b)
++
++    assert trigsimp(expr) == cos(a)
++    assert simplify(expr) == cos(a)
++    assert Matrix([sin(a), cos(a), 0]).dot(
++        Matrix([sin(b), cos(b), 0])).simplify() == cos(a)
++    assert acos(expr).simplify() == a
++
++
+ def test_trigsimp_issues():
+     a, x, y = symbols('a x y')
+ 
+diff --git a/sympy/simplify/trigsimp.py b/sympy/simplify/trigsimp.py
+index 8ba346a..032d617 100644
+--- a/sympy/simplify/trigsimp.py
++++ b/sympy/simplify/trigsimp.py
+@@ -1143,8 +1143,8 @@ def _futrig(e, **kwargs):
+         lambda x: _eapply(factor, x, trigs),
+         TR14,  # factored powers of identities
+         [identity, lambda x: _eapply(_mexpand, x, trigs)],
+-        TRmorrie,
+         TR10i,  # sin-cos products > sin-cos of sums
++        TRmorrie,
+         [identity, TR8],  # sin-cos products -> sin-cos of sums
+         [identity, lambda x: TR2i(TR2(x))],  # tan -> sin-cos -> tan
+         [

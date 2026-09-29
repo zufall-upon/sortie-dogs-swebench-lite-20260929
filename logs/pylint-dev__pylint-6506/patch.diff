@@ -1,0 +1,50 @@
+diff --git a/pylint/__init__.py b/pylint/__init__.py
+index 3aa4b7f..ed0424a 100644
+--- a/pylint/__init__.py
++++ b/pylint/__init__.py
+@@ -19,10 +19,13 @@ def run_pylint(argv: Sequence[str] | None = None) -> None:
+ 
+     argv can be a sequence of strings normally supplied as arguments on the command line
+     """
++    from pylint.config.exceptions import _UnrecognizedOptionError
+     from pylint.lint import Run as PylintRun
+ 
+     try:
+         PylintRun(argv or sys.argv[1:])
++    except _UnrecognizedOptionError:
++        sys.exit(32)
+     except KeyboardInterrupt:
+         sys.exit(1)
+ 
+diff --git a/tests/test_pylint_runners.py b/tests/test_pylint_runners.py
+index b06046e..dc795d3 100644
+--- a/tests/test_pylint_runners.py
++++ b/tests/test_pylint_runners.py
+@@ -11,6 +11,7 @@ from collections.abc import Callable
+ from unittest.mock import patch
+ 
+ import pytest
++from pytest import CaptureFixture
+ from py._path.local import LocalPath  # type: ignore[import]
+ 
+ from pylint import run_epylint, run_pylint, run_pyreverse, run_symilar
+@@ -40,3 +41,19 @@ def test_runner_with_arguments(runner: Callable, tmpdir: LocalPath) -> None:
+         with pytest.raises(SystemExit) as err:
+             runner(testargs)
+         assert err.value.code == 0
++
++
++@pytest.mark.parametrize(
++    "args, option",
++    [(["-Q"], "Q"), (["--unknown-option=yes"], "unknown-option=yes")],
++)
++def test_unrecognized_options_exit_without_traceback(
++    args: list[str], option: str, capsys: CaptureFixture
++) -> None:
++    with pytest.raises(SystemExit) as err:
++        run_pylint(args)
++
++    assert err.value.code == 32
++    output = capsys.readouterr()
++    assert f"E0015: Unrecognized option found: {option}" in output.out
++    assert "Traceback" not in output.err

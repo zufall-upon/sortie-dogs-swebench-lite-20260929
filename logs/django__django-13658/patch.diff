@@ -1,0 +1,45 @@
+diff --git a/django/core/management/__init__.py b/django/core/management/__init__.py
+index 1ba093e..b8ea725 100644
+--- a/django/core/management/__init__.py
++++ b/django/core/management/__init__.py
+@@ -344,7 +344,10 @@ class ManagementUtility:
+         # Preprocess options to extract --settings and --pythonpath.
+         # These options could affect the commands that are available, so they
+         # must be processed early.
+-        parser = CommandParser(usage='%(prog)s subcommand [options] [args]', add_help=False, allow_abbrev=False)
++        parser = CommandParser(
++            prog=self.prog_name, usage='%(prog)s subcommand [options] [args]',
++            add_help=False, allow_abbrev=False,
++        )
+         parser.add_argument('--settings')
+         parser.add_argument('--pythonpath')
+         parser.add_argument('args', nargs='*')  # catch-all
+diff --git a/tests/admin_scripts/tests.py b/tests/admin_scripts/tests.py
+index 62c6f48..e2ae10d 100644
+--- a/tests/admin_scripts/tests.py
++++ b/tests/admin_scripts/tests.py
+@@ -17,7 +17,7 @@ from unittest import mock
+ from django import conf, get_version
+ from django.conf import settings
+ from django.core.management import (
+-    BaseCommand, CommandError, call_command, color,
++    BaseCommand, CommandError, call_command, color, execute_from_command_line,
+ )
+ from django.core.management.commands.loaddata import Command as LoaddataCommand
+ from django.core.management.commands.runserver import (
+@@ -2266,6 +2266,15 @@ class Dumpdata(AdminScriptTestCase):
+ class MainModule(AdminScriptTestCase):
+     """python -m django works like django-admin."""
+ 
++    def test_custom_argv_with_none_sys_argv(self):
++        out = StringIO()
++        with mock.patch('sys.argv', [None]), mock.patch('sys.stdout', out):
++            execute_from_command_line(['custom-manage.py', 'help'])
++        self.assertOutput(
++            out.getvalue(),
++            "Type 'custom-manage.py help <subcommand>' for help on a specific subcommand.",
++        )
++
+     def test_program_name_in_help(self):
+         out, err = self.run_test(['-m', 'django', 'help'])
+         self.assertOutput(out, "Type 'python -m django help <subcommand>' for help on a specific subcommand.")

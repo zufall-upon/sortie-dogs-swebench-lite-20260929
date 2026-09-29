@@ -1,0 +1,111 @@
+diff --git a/django/db/migrations/autodetector.py b/django/db/migrations/autodetector.py
+index 89e2dce..aa72412 100644
+--- a/django/db/migrations/autodetector.py
++++ b/django/db/migrations/autodetector.py
+@@ -618,6 +618,19 @@ class MigrationAutodetector:
+                 for name in sorted(related_fields)
+             ]
+             related_dependencies.append((app_label, model_name, None, True))
++            # Ensure _order exists before creating indexes that include it.
++            if order_with_respect_to:
++                self.add_operation(
++                    app_label,
++                    operations.AlterOrderWithRespectTo(
++                        name=model_name,
++                        order_with_respect_to=order_with_respect_to,
++                    ),
++                    dependencies=[
++                        (app_label, model_name, order_with_respect_to, True),
++                        (app_label, model_name, None, True),
++                    ]
++                )
+             for index in indexes:
+                 self.add_operation(
+                     app_label,
+@@ -654,18 +667,6 @@ class MigrationAutodetector:
+                     ),
+                     dependencies=related_dependencies
+                 )
+-            if order_with_respect_to:
+-                self.add_operation(
+-                    app_label,
+-                    operations.AlterOrderWithRespectTo(
+-                        name=model_name,
+-                        order_with_respect_to=order_with_respect_to,
+-                    ),
+-                    dependencies=[
+-                        (app_label, model_name, order_with_respect_to, True),
+-                        (app_label, model_name, None, True),
+-                    ]
+-                )
+ 
+             # Fix relationships if the model changed from a proxy model to a
+             # concrete model.
+diff --git a/tests/migrations/test_autodetector.py b/tests/migrations/test_autodetector.py
+index 236af43..fe2e2cc 100644
+--- a/tests/migrations/test_autodetector.py
++++ b/tests/migrations/test_autodetector.py
+@@ -1432,6 +1432,63 @@ class AutodetectorTests(TestCase):
+         self.assertOperationAttributes(changes, 'otherapp', 0, 0, name='Author')
+         self.assertOperationAttributes(changes, 'otherapp', 0, 1, model_name='author', index=added_index)
+ 
++    def test_create_model_with_order_with_respect_to_and_index(self):
++        look = ModelState('posts', 'Look', [
++            ('id', models.AutoField(primary_key=True)),
++            ('created_at', models.DateTimeField()),
++            ('updated_at', models.DateTimeField()),
++        ], {
++            'indexes': [
++                models.Index(fields=['created_at'], name='look_created_at_idx'),
++                models.Index(fields=['updated_at'], name='look_updated_at_idx'),
++            ],
++        })
++        look_image = ModelState('posts', 'LookImage', [
++            ('id', models.AutoField(primary_key=True)),
++            ('look', models.ForeignKey('posts.Look', models.CASCADE)),
++            ('created_at', models.DateTimeField()),
++            ('updated_at', models.DateTimeField()),
++        ], {
++            'order_with_respect_to': 'look',
++            'indexes': [
++                models.Index(fields=['look', '_order'], name='lookimage_look_order_idx'),
++                models.Index(fields=['created_at'], name='lookimage_created_at_idx'),
++                models.Index(fields=['updated_at'], name='lookimage_updated_at_idx'),
++            ],
++        })
++        changes = self.get_changes([], [look, look_image])
++        self.assertNumberMigrations(changes, 'posts', 1)
++
++        migration = changes['posts'][0]
++        look_image_operation = next(
++            operation for operation in migration.operations
++            if isinstance(operation, migrations.CreateModel) and operation.name == 'LookImage'
++        )
++        self.assertNotIn('_order', [name for name, field in look_image_operation.fields])
++
++        order_index = models.Index(fields=['look', '_order'], name='lookimage_look_order_idx')
++        add_index_position = next(
++            position for position, operation in enumerate(migration.operations)
++            if isinstance(operation, migrations.AddIndex) and operation.index == order_index
++        )
++        alter_order_position = next(
++            position for position, operation in enumerate(migration.operations)
++            if isinstance(operation, migrations.AlterOrderWithRespectTo) and
++            operation.name_lower == 'lookimage' and operation.order_with_respect_to == 'look'
++        )
++        self.assertGreater(alter_order_position, migration.operations.index(look_image_operation))
++        self.assertLess(alter_order_position, add_index_position)
++        self.assertCountEqual(
++            [operation.index for operation in migration.operations if isinstance(operation, migrations.AddIndex)],
++            [
++                models.Index(fields=['created_at'], name='look_created_at_idx'),
++                models.Index(fields=['updated_at'], name='look_updated_at_idx'),
++                order_index,
++                models.Index(fields=['created_at'], name='lookimage_created_at_idx'),
++                models.Index(fields=['updated_at'], name='lookimage_updated_at_idx'),
++            ],
++        )
++
+     def test_add_indexes(self):
+         """Test change detection of new indexes."""
+         changes = self.get_changes([self.author_empty, self.book], [self.author_empty, self.book_indexes])

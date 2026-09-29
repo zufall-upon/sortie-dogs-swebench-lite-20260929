@@ -1,0 +1,253 @@
+diff --git a/pylint/config/argument.py b/pylint/config/argument.py
+index 3c29515..9ae4f3a 100644
+--- a/pylint/config/argument.py
++++ b/pylint/config/argument.py
+@@ -21,6 +21,7 @@ from pylint import interfaces
+ from pylint import utils as pylint_utils
+ from pylint.config.callback_actions import _CallbackAction, _ExtendAction
+ from pylint.config.deprecation_actions import _NewNamesAction, _OldNamesAction
++from pylint.config.option import _compile_regexp
+ from pylint.constants import PY38_PLUS
+ 
+ if sys.version_info >= (3, 8):
+@@ -88,6 +89,14 @@ def _path_transformer(value: str) -> str:
+     return os.path.expandvars(os.path.expanduser(value))
+ 
+ 
++def _regexp_transformer(value: str) -> Pattern[str]:
++    """Compile a regular expression, reporting invalid patterns as argument errors."""
++    try:
++        return _compile_regexp(value)
++    except (re.error, OverflowError) as exc:
++        raise argparse.ArgumentTypeError(str(exc)) from exc
++
++
+ def _py_version_transformer(value: str) -> tuple[int, ...]:
+     """Transforms a version string into a version tuple."""
+     try:
+@@ -103,7 +112,7 @@ def _regexp_csv_transfomer(value: str) -> Sequence[Pattern[str]]:
+     """Transforms a comma separated list of regular expressions."""
+     patterns: list[Pattern[str]] = []
+     for pattern in _csv_transformer(value):
+-        patterns.append(re.compile(pattern))
++        patterns.append(_regexp_transformer(pattern))
+     return patterns
+ 
+ 
+@@ -112,7 +121,7 @@ def _regexp_paths_csv_transfomer(value: str) -> Sequence[Pattern[str]]:
+     patterns: list[Pattern[str]] = []
+     for pattern in _csv_transformer(value):
+         patterns.append(
+-            re.compile(
++            _regexp_transformer(
+                 str(pathlib.PureWindowsPath(pattern)).replace("\\", "\\\\")
+                 + "|"
+                 + pathlib.PureWindowsPath(pattern).as_posix()
+@@ -130,7 +139,7 @@ _TYPE_TRANSFORMERS: dict[str, Callable[[str], _ArgumentTypes]] = {
+     "non_empty_string": _non_empty_string_transformer,
+     "path": _path_transformer,
+     "py_version": _py_version_transformer,
+-    "regexp": re.compile,
++    "regexp": _regexp_transformer,
+     "regexp_csv": _regexp_csv_transfomer,
+     "regexp_paths_csv": _regexp_paths_csv_transfomer,
+     "string": pylint_utils._unquote,
+diff --git a/pylint/config/option.py b/pylint/config/option.py
+index 5043fe7..9d3da86 100644
+--- a/pylint/config/option.py
++++ b/pylint/config/option.py
+@@ -14,6 +14,63 @@ from re import Pattern
+ from pylint import utils
+ 
+ 
++# Unicode Script=Han ranges supported by the standard library's regex engine.
++_HAN_UNICODE_RANGES = (
++    r"\u2e80-\u2e99"
++    r"\u2e9b-\u2ef3"
++    r"\u2f00-\u2fd5"
++    r"\u3005\u3007"
++    r"\u3021-\u3029"
++    r"\u3038-\u303b"
++    r"\u3400-\u4dbf"
++    r"\u4e00-\u9fff"
++    r"\uf900-\ufa6d"
++    r"\ufa70-\ufad9"
++    r"\U00020000-\U0002a6df"
++    r"\U0002a700-\U0002b73f"
++    r"\U0002b740-\U0002b81f"
++    r"\U0002b820-\U0002ceaf"
++    r"\U0002ceb0-\U0002ebe0"
++    r"\U0002ebf0-\U0002ee5f"
++    r"\U0002f800-\U0002fa1f"
++    r"\U00030000-\U0003134a"
++    r"\U00031350-\U000323af"
++)
++
++
++def _expand_unicode_properties(pattern: str) -> str:
++    """Expand Han script escapes, which are not supported by ``re``."""
++    expanded: list[str] = []
++    in_character_class = False
++    index = 0
++    property_escape = r"\p{Han}"
++    while index < len(pattern):
++        if pattern.startswith(property_escape, index):
++            replacement = _HAN_UNICODE_RANGES
++            if not in_character_class:
++                replacement = f"[{replacement}]"
++            expanded.append(replacement)
++            index += len(property_escape)
++            continue
++
++        character = pattern[index]
++        if character == "\\":
++            expanded.append(pattern[index : index + 2])
++            index += 2
++            continue
++        if character == "[":
++            in_character_class = True
++        elif character == "]":
++            in_character_class = False
++        expanded.append(character)
++        index += 1
++    return "".join(expanded)
++
++
++def _compile_regexp(pattern: str) -> Pattern[str]:
++    return re.compile(_expand_unicode_properties(pattern))
++
++
+ # pylint: disable=unused-argument
+ def _csv_validator(_, name, value):
+     return utils._check_csv(value)
+@@ -23,7 +80,7 @@ def _csv_validator(_, name, value):
+ def _regexp_validator(_, name, value):
+     if hasattr(value, "pattern"):
+         return value
+-    return re.compile(value)
++    return _compile_regexp(value)
+ 
+ 
+ # pylint: disable=unused-argument
+@@ -103,7 +160,7 @@ VALIDATORS = {
+     "string": utils._unquote,
+     "int": int,
+     "float": float,
+-    "regexp": lambda pattern: re.compile(pattern or ""),
++    "regexp": lambda pattern: _compile_regexp(pattern or ""),
+     "regexp_csv": _regexp_csv_validator,
+     "regexp_paths_csv": _regexp_paths_csv_validator,
+     "csv": _csv_validator,
+diff --git a/tests/config/test_argparse_config.py b/tests/config/test_argparse_config.py
+index 3bad5e8..953fd29 100644
+--- a/tests/config/test_argparse_config.py
++++ b/tests/config/test_argparse_config.py
+@@ -6,6 +6,7 @@
+ 
+ import re
+ from os.path import abspath, dirname, join
++from pathlib import Path
+ 
+ import pytest
+ 
+@@ -17,6 +18,80 @@ HERE = abspath(dirname(__file__))
+ REGRTEST_DATA_DIR = join(HERE, "..", "regrtest_data")
+ EMPTY_MODULE = join(REGRTEST_DATA_DIR, "empty.py")
+ LOGGING_TEST = join(HERE, "data", "logging_format_interpolation_style.py")
++FUNCTION_RGX_WITH_HAN_PROPERTY = r"[\p{Han}a-z_][\p{Han}a-z0-9_]{2,30}$"
++
++
++def test_function_regexp_with_han_property_from_rcfile(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    config_file = tmp_path / ".pylintrc"
++    config_file.write_text(f"[BASIC]\nfunction-rgx={FUNCTION_RGX_WITH_HAN_PROPERTY}\n")
++    function_file = tmp_path / "functions.py"
++    function_file.write_text("def 汉字名():\n    pass\n\ndef fooBar():\n    pass\n")
++
++    run = Run(
++        [
++            str(function_file),
++            f"--rcfile={config_file}",
++            "--disable=all",
++            "--enable=invalid-name",
++        ],
++        exit=False,
++    )
++
++    assert run.linter.config.function_rgx.match("汉字名")
++    assert run.linter.stats.by_msg == {"invalid-name": 1}
++    assert "fooBar" in capsys.readouterr().out
++
++
++def test_malformed_function_regexp_is_reported_as_argument_error(
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    with pytest.raises(SystemExit) as exc:
++        Run([EMPTY_MODULE, "--function-rgx=("], exit=False)
++
++    assert exc.value.code == 2
++    stderr = capsys.readouterr().err
++    assert "argument --function-rgx" in stderr
++    assert "Traceback" not in stderr
++
++
++def test_function_regexp_overflow_is_reported_as_argument_error(
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    with pytest.raises(SystemExit) as exc:
++        Run([EMPTY_MODULE, "--function-rgx=a{4294967295}"], exit=False)
++
++    assert exc.value.code == 2
++    stderr = capsys.readouterr().err
++    assert "argument --function-rgx" in stderr
++    assert "the repetition number is too large" in stderr
++    assert "Traceback" not in stderr
++
++
++@pytest.mark.parametrize(
++    ("argument", "option"),
++    [
++        ("--good-names-rgxs=(", "good-names-rgxs"),
++        ("--ignore-paths=[", "ignore-paths"),
++    ],
++)
++def test_invalid_regexp_lists_are_reported_as_argument_errors(
++    argument: str, option: str, capsys: pytest.CaptureFixture[str]
++) -> None:
++    with pytest.raises(SystemExit) as exc:
++        Run([EMPTY_MODULE, argument], exit=False)
++
++    assert exc.value.code == 2
++    stderr = capsys.readouterr().err
++    assert f"argument --{option}" in stderr
++    assert "Traceback" not in stderr
++
++
++def test_valid_function_regexp_is_compiled() -> None:
++    run = Run([EMPTY_MODULE, "--function-rgx=custom_.*"], exit=False)
++
++    assert run.linter.config.function_rgx.pattern == "custom_.*"
+ 
+ 
+ class TestArgparseOptionsProviderMixin:
+diff --git a/tests/config/unittest_config.py b/tests/config/unittest_config.py
+index 8c668aa..49f2abb 100644
+--- a/tests/config/unittest_config.py
++++ b/tests/config/unittest_config.py
+@@ -23,6 +23,15 @@ def test__regexp_validator_valid() -> None:
+     assert result.pattern == "test_.*"
+ 
+ 
++def test__regexp_validator_han_script() -> None:
++    pattern = r"[\p{Han}a-z_][\p{Han}a-z0-9_]{2,30}$"
++    result = config.option._regexp_validator(None, None, pattern)
++
++    assert result.match("汉字名")
++    assert result.match("abc")
++    assert not result.match("fooBar")
++
++
+ def test__regexp_validator_invalid() -> None:
+     with pytest.raises(sre_constants.error):
+         config.option._regexp_validator(None, None, "test_)")

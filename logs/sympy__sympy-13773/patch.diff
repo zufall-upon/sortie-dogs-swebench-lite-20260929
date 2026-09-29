@@ -1,0 +1,235 @@
+diff --git a/sympy/matrices/common.py b/sympy/matrices/common.py
+index 379a291..aaba585 100644
+--- a/sympy/matrices/common.py
++++ b/sympy/matrices/common.py
+@@ -7,6 +7,11 @@
+ from __future__ import print_function, division
+ 
+ import collections
++from functools import wraps
++try:
++    from collections.abc import Iterable
++except ImportError:
++    from collections import Iterable
+ from sympy.core.add import Add
+ from sympy.core.basic import Basic, Atom
+ from sympy.core.expr import Expr
+@@ -40,6 +45,17 @@ class NonSquareMatrixError(ShapeError):
+     pass
+ 
+ 
++def _matrix_only_matmul(func):
++    @wraps(func)
++    def wrapper(self, other):
++        other = _matrixify(other)
++        if not (getattr(other, 'is_Matrix', False) or
++                getattr(other, 'is_MatrixLike', False)):
++            raise TypeError("Matrix operands required for @")
++        return func(self, other)
++    return wrapper
++
++
+ class MatrixRequired(object):
+     """All subclasses of matrix objects must implement the
+     required matrix properties listed here."""
+@@ -1971,9 +1987,14 @@ def __add__(self, other):
+     def __div__(self, other):
+         return self * (S.One / other)
+ 
++    @_matrix_only_matmul
+     @call_highest_priority('__rmatmul__')
+     def __matmul__(self, other):
+-        return self.__mul__(other)
++        other = _matrixify(other)
++        if (getattr(other, 'is_Matrix', False) or
++                getattr(other, 'is_MatrixLike', False)):
++            return self.__mul__(other)
++        return NotImplemented
+ 
+     @call_highest_priority('__rmul__')
+     def __mul__(self, other):
+@@ -2019,7 +2040,7 @@ def __mul__(self, other):
+             return MatrixArithmetic._eval_matrix_mul(self, other)
+ 
+         # if 'other' is not iterable then scalar multiplication.
+-        if not isinstance(other, collections.Iterable):
++        if not isinstance(other, Iterable):
+             try:
+                 return self._eval_scalar_mul(other)
+             except TypeError:
+@@ -2066,9 +2087,14 @@ def __pow__(self, num):
+     def __radd__(self, other):
+         return self + other
+ 
++    @_matrix_only_matmul
+     @call_highest_priority('__matmul__')
+     def __rmatmul__(self, other):
+-        return self.__rmul__(other)
++        other = _matrixify(other)
++        if (getattr(other, 'is_Matrix', False) or
++                getattr(other, 'is_MatrixLike', False)):
++            return self.__rmul__(other)
++        return NotImplemented
+ 
+     @call_highest_priority('__mul__')
+     def __rmul__(self, other):
+@@ -2087,7 +2113,7 @@ def __rmul__(self, other):
+             return MatrixArithmetic._eval_matrix_rmul(self, other)
+ 
+         # if 'other' is not iterable then scalar multiplication.
+-        if not isinstance(other, collections.Iterable):
++        if not isinstance(other, Iterable):
+             try:
+                 return self._eval_scalar_rmul(other)
+             except TypeError:
+diff --git a/sympy/matrices/expressions/matexpr.py b/sympy/matrices/expressions/matexpr.py
+index 9262713..0ce5c90 100644
+--- a/sympy/matrices/expressions/matexpr.py
++++ b/sympy/matrices/expressions/matexpr.py
+@@ -30,6 +30,15 @@ def __sympifyit_wrapper(a, b):
+     return deco
+ 
+ 
++def _matrix_only_matmul(func):
++    @wraps(func)
++    def wrapper(self, other):
++        if not getattr(other, 'is_Matrix', False):
++            raise TypeError("Matrix operands required for @")
++        return func(self, other)
++    return wrapper
++
++
+ class MatrixExpr(Expr):
+     """ Superclass for Matrix Expressions
+ 
+@@ -109,9 +118,12 @@ def __rsub__(self, other):
+     def __mul__(self, other):
+         return MatMul(self, other).doit()
+ 
++    @_matrix_only_matmul
+     @_sympifyit('other', NotImplemented)
+-    @call_highest_priority('__rmul__')
++    @call_highest_priority('__rmatmul__')
+     def __matmul__(self, other):
++        if not getattr(other, 'is_Matrix', False):
++            return NotImplemented
+         return MatMul(self, other).doit()
+ 
+     @_sympifyit('other', NotImplemented)
+@@ -119,9 +131,12 @@ def __matmul__(self, other):
+     def __rmul__(self, other):
+         return MatMul(other, self).doit()
+ 
++    @_matrix_only_matmul
+     @_sympifyit('other', NotImplemented)
+-    @call_highest_priority('__mul__')
++    @call_highest_priority('__matmul__')
+     def __rmatmul__(self, other):
++        if not getattr(other, 'is_Matrix', False):
++            return NotImplemented
+         return MatMul(other, self).doit()
+ 
+     @_sympifyit('other', NotImplemented)
+diff --git a/sympy/matrices/expressions/tests/test_matexpr.py b/sympy/matrices/expressions/tests/test_matexpr.py
+index c7f09c9..ed48edb 100644
+--- a/sympy/matrices/expressions/tests/test_matexpr.py
++++ b/sympy/matrices/expressions/tests/test_matexpr.py
+@@ -129,7 +129,25 @@ def test_multiplication():
+     assert (A*0*B) == ZeroMatrix(n, l)
+ 
+     raises(ShapeError, lambda: B*A)
++    assert (A @ B).shape == (n, l)
+     assert (2*A).shape == A.shape
++    raises(TypeError, lambda: A @ 2)
++    raises(TypeError, lambda: 2 @ A)
++    raises(TypeError, lambda: A @ x)
++    raises(TypeError, lambda: x @ A)
++    from sympy.core.tests.test_priority import Higher
++    h = Higher()
++    raises(TypeError, lambda: A @ h)
++    raises(TypeError, lambda: h @ A)
++
++    class AtHigher(Higher):
++        def __rmatmul__(self, other):
++            return 2
++
++    h = AtHigher()
++    for matrix in (A, Matrix([[1, 2], [3, 4]])):
++        raises(TypeError, lambda: matrix @ h)
++        raises(TypeError, lambda: h @ matrix)
+ 
+     assert A * ZeroMatrix(m, m) * B == ZeroMatrix(n, l)
+ 
+diff --git a/sympy/matrices/tests/test_commonmatrix.py b/sympy/matrices/tests/test_commonmatrix.py
+index 27d9726..cb089b9 100644
+--- a/sympy/matrices/tests/test_commonmatrix.py
++++ b/sympy/matrices/tests/test_commonmatrix.py
+@@ -625,7 +625,7 @@ def test_multiplication():
+     assert c[2, 1] == 0
+ 
+     try:
+-        eval('c = a @ b')
++        c = eval('a @ b')
+     except SyntaxError:
+         pass
+     else:
+@@ -663,16 +663,10 @@ def test_multiplication():
+     assert c[1, 0] == 3*5
+     assert c[1, 1] == 0
+ 
+-    try:
+-        eval('c = 5 @ b')
+-    except SyntaxError:
+-        pass
+-    else:
+-        assert isinstance(c, ArithmeticOnlyMatrix)
+-        assert c[0, 0] == 5
+-        assert c[0, 1] == 2*5
+-        assert c[1, 0] == 3*5
+-        assert c[1, 1] == 0
++    raises(TypeError, lambda: eval('5 @ b', globals(), {'b': b}))
++    raises(TypeError, lambda: eval('b @ 5', globals(), {'b': b}))
++    raises(TypeError, lambda: eval('{} @ b', globals(), {'b': b}))
++    raises(TypeError, lambda: eval('b @ {}', globals(), {'b': b}))
+ 
+ def test_power():
+     raises(NonSquareMatrixError, lambda: Matrix((1, 2))**2)
+diff --git a/sympy/matrices/tests/test_matrices.py b/sympy/matrices/tests/test_matrices.py
+index ed4924b..1bca81b 100644
+--- a/sympy/matrices/tests/test_matrices.py
++++ b/sympy/matrices/tests/test_matrices.py
+@@ -139,7 +139,7 @@ def test_multiplication():
+     assert c[2, 1] == 0
+ 
+     try:
+-        eval('c = a @ b')
++        c = eval('a @ b')
+     except SyntaxError:
+         pass
+     else:
+@@ -177,16 +177,15 @@ def test_multiplication():
+     assert c[1, 0] == 3*5
+     assert c[1, 1] == 0
+ 
+-    try:
+-        eval('c = 5 @ b')
+-    except SyntaxError:
+-        pass
+-    else:
+-        assert isinstance(c, Matrix)
+-        assert c[0, 0] == 5
+-        assert c[0, 1] == 2*5
+-        assert c[1, 0] == 3*5
+-        assert c[1, 1] == 0
++    raises(TypeError, lambda: eval('5 @ b', globals(), {'b': b}))
++    raises(TypeError, lambda: eval('b @ 5', globals(), {'b': b}))
++    raises(TypeError, lambda: eval('{} @ b', globals(), {'b': b}))
++    raises(TypeError, lambda: eval('b @ {}', globals(), {'b': b}))
++
++    sparse = SparseMatrix([[1, 2], [3, 4]])
++    assert eval('sparse @ sparse') == SparseMatrix([[7, 10], [15, 22]])
++    raises(TypeError, lambda: eval('5 @ sparse', globals(), {'sparse': sparse}))
++    raises(TypeError, lambda: eval('sparse @ 5', globals(), {'sparse': sparse}))
+ 
+ 
+ def test_power():

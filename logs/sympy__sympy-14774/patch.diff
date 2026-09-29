@@ -1,0 +1,40 @@
+diff --git a/sympy/printing/latex.py b/sympy/printing/latex.py
+index a3ead15..67ec54b 100644
+--- a/sympy/printing/latex.py
++++ b/sympy/printing/latex.py
+@@ -740,7 +740,7 @@ def _print_Function(self, expr, exp=None):
+                 len(args) == 1 and \
+                 not self._needs_function_brackets(expr.args[0])
+ 
+-            inv_trig_table = ["asin", "acos", "atan", "acot"]
++            inv_trig_table = ["asin", "acos", "atan", "acot", "asec", "acsc"]
+ 
+             # If the function is an inverse trig function, handle the style
+             if func in inv_trig_table:
+diff --git a/sympy/printing/tests/test_latex.py b/sympy/printing/tests/test_latex.py
+index e44757c..5959287 100644
+--- a/sympy/printing/tests/test_latex.py
++++ b/sympy/printing/tests/test_latex.py
+@@ -17,7 +17,7 @@
+     Contains, divisor_sigma, SymmetricDifference, SeqPer, SeqFormula,
+     SeqAdd, SeqMul, fourier_series, pi, ConditionSet, ComplexRegion, fps,
+     AccumBounds, reduced_totient, primenu, primeomega, SingularityFunction,
+-     UnevaluatedExpr, Quaternion)
++     UnevaluatedExpr, Quaternion, acsc, asec)
+ 
+ from sympy.ntheory.factor_ import udivisor_sigma
+ 
+@@ -460,6 +460,13 @@ def test_latex_functions():
+     assert latex(fjlkd) == r'\operatorname{fjlkd}'
+ 
+ 
++def test_latex_inverse_trig_full():
++    assert latex(acsc(x), inv_trig_style="full") == \
++        r"\operatorname{arccsc}{\left (x \right )}"
++    assert latex(asec(x), inv_trig_style="full") == \
++        r"\operatorname{arcsec}{\left (x \right )}"
++
++
+ # test that notation passes to subclasses of the same name only
+ def test_function_subclass_different_name():
+     class mygamma(gamma):

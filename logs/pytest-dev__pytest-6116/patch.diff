@@ -1,0 +1,36 @@
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index 843c5b5..78c5803 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -107,6 +107,7 @@ def pytest_addoption(parser):
+ 
+     group = parser.getgroup("collect", "collection")
+     group.addoption(
++        "-C",
+         "--collectonly",
+         "--collect-only",
+         action="store_true",
+diff --git a/testing/test_terminal.py b/testing/test_terminal.py
+index 1bec577..7e9f7df 100644
+--- a/testing/test_terminal.py
++++ b/testing/test_terminal.py
+@@ -276,6 +276,19 @@ class TestTerminal:
+ 
+ 
+ class TestCollectonly:
++    def test_collectonly_shortcut(self, testdir):
++        testdir.makepyfile(
++            """
++            def test_func():
++                assert False
++        """
++        )
++        result = testdir.runpytest("-C")
++        assert result.ret == 0
++        result.stdout.fnmatch_lines(
++            ["<Module test_collectonly_shortcut.py>", "  <Function test_func>"]
++        )
++
+     def test_collectonly_basic(self, testdir):
+         testdir.makepyfile(
+             """

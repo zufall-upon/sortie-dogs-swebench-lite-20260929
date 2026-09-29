@@ -1,0 +1,93 @@
+diff --git a/sympy/polys/polytools.py b/sympy/polys/polytools.py
+index c9e77a9..93c8e68 100644
+--- a/sympy/polys/polytools.py
++++ b/sympy/polys/polytools.py
+@@ -5887,7 +5887,38 @@ def key(obj):
+             rep = poly.rep.rep
+             return (len(rep), len(poly.gens), exp, rep)
+ 
+-    return sorted(factors, key=key)
++    factors = sorted(factors, key=key)
++
++    if method == 'sqf':
++        while True:
++            merged = []
++            i = 0
++            regrouped = False
++
++            while i < len(factors):
++                j = i + 1
++                poly, exp = factors[i]
++
++                while (isinstance(exp, (int, Integer)) and j < len(factors)
++                       and factors[j][1] == exp):
++                    poly *= factors[j][0]
++                    j += 1
++
++                if j == i + 1:
++                    merged.append((poly, exp))
++                else:
++                    regrouped = True
++                    _, sqf_factors = poly.sqf_list()
++                    merged.extend((f, exp*k) for f, k in sqf_factors)
++
++                i = j
++
++            if not regrouped:
++                break
++
++            factors = sorted(merged, key=key)
++
++    return factors
+ 
+ 
+ def _factors_product(factors):
+diff --git a/sympy/polys/tests/test_polytools.py b/sympy/polys/tests/test_polytools.py
+index 82e5f4d..3b0edd1 100644
+--- a/sympy/polys/tests/test_polytools.py
++++ b/sympy/polys/tests/test_polytools.py
+@@ -2331,6 +2331,44 @@ def test_sqf():
+     assert sqf_list(f) == (1, [(x + 1, 40000000000)])
+ 
+ 
++def test_sqf_list_equal_multiplicities():
++    f = (x**2 + 1)*(x - 1)**2*(x - 2)**3*(x - 3)**3
++    expected = (1, [(x**2 + 1, 1), (x - 1, 2),
++                    (x**2 - 5*x + 6, 3)])
++
++    assert sqf_list(f) == expected
++    assert sqf_list(Poly(f)) == (1, [
++        (Poly(x**2 + 1, x), 1),
++        (Poly(x - 1, x), 2),
++        (Poly(x**2 - 5*x + 6, x), 3)])
++    assert sqf_list(f, polys=True) == (1, [
++        (Poly(x**2 + 1, x), 1),
++        (Poly(x - 1, x), 2),
++        (Poly(x**2 - 5*x + 6, x), 3)])
++
++    g = 2*(x - 1)**3*(x + 1)**3
++    assert sqf_list(g) == (2, [(x**2 - 1, 3)])
++
++    assert sqf_list((2*x)**y, x) == (1, [(2, y), (x, y)])
++
++    overlap = (x**2 - 1)*(x - 1)
++    assert sqf_list(overlap) == (1, [(x + 1, 1), (x - 1, 2)])
++
++    collision = (x - 2)**2*(x - 1)*(x**2 - 1)
++    assert sqf_list(collision) == (
++        1, [(x + 1, 1), (x**2 - 3*x + 2, 2)])
++
++    nonmonic = (x/3 - 1)**3*(x/2 - 1)**3
++    assert sqf_list(nonmonic) == (Rational(1, 216),
++                                  [(x**2 - 5*x + 6, 3)])
++
++    frac = f/((x - 4)**2*(x - 5)**2)
++    assert sqf_list(frac, frac=True) == (
++        1,
++        [(x**2 + 1, 1), (x - 1, 2), (x**2 - 5*x + 6, 3)],
++        [(x**2 - 9*x + 20, 2)])
++
++
+ def test_factor():
+     f = x**5 - x**3 - x**2 + 1
+ 

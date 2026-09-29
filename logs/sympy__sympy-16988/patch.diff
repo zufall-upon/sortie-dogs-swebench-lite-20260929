@@ -1,0 +1,48 @@
+diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py
+index 03cf57a..b91cf71 100644
+--- a/sympy/sets/sets.py
++++ b/sympy/sets/sets.py
+@@ -1361,7 +1361,9 @@ def _handle_finite_sets(args):
+                     # and add this as a new arg
+                     contained = [x for x in symbolic_s_list
+                         if sympify(v.contains(x)) is S.true]
+-                    if contained != symbolic_s_list:
++                    # With no symbolic elements in `s`, keep `v`: its
++                    # symbolic elements may equal concrete members of `s`.
++                    if contained != symbolic_s_list or not symbolic_s_list:
+                         other.append(
+                             v - FiniteSet(
+                             *contained, evaluate=False))
+@@ -1991,6 +1993,15 @@ def simplify_intersection(args):
+     if S.EmptySet in args:
+         return S.EmptySet
+ 
++    # Intersection is idempotent; discard duplicates before handling finite sets.
++    unique_args = []
++    seen_args = set()
++    for arg in args:
++        if arg not in seen_args:
++            unique_args.append(arg)
++            seen_args.add(arg)
++    args = unique_args
++
+     # Handle Finite sets
+     rv = Intersection._handle_finite_sets(args)
+ 
+diff --git a/sympy/sets/tests/test_sets.py b/sympy/sets/tests/test_sets.py
+index 67761ce..d8be68a 100644
+--- a/sympy/sets/tests/test_sets.py
++++ b/sympy/sets/tests/test_sets.py
+@@ -1102,6 +1102,12 @@ def test_finite_set_intersection():
+     # The following should not produce recursion errors
+     # Note: some of these are not completely correct. See
+     # https://github.com/sympy/sympy/issues/16342.
++    duplicate_intersection = Intersection({1}, {1}, {x})
++    expected_intersection = Intersection({1}, {x}, evaluate=False)
++    assert duplicate_intersection == expected_intersection
++    assert Intersection({1}, {x}) == expected_intersection
++    assert duplicate_intersection != S.EmptySet
++
+     assert Intersection(FiniteSet(-oo, x), FiniteSet(x)) == FiniteSet(x)
+     assert Intersection._handle_finite_sets([FiniteSet(-oo, x), FiniteSet(0, x)]) == FiniteSet(x)
+ 

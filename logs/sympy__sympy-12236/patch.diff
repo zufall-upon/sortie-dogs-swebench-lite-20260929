@@ -1,0 +1,33 @@
+diff --git a/sympy/polys/partfrac.py b/sympy/polys/partfrac.py
+index 612b8f4..b182cab 100644
+--- a/sympy/polys/partfrac.py
++++ b/sympy/polys/partfrac.py
+@@ -127,7 +127,7 @@ def apart(f, x=None, full=False, **options):
+ 
+     common, P, Q = P.cancel(Q)
+ 
+-    poly, P = P.div(Q, auto=True)
++    poly, P = P.to_field().div(Q.to_field())
+     P, Q = P.rat_clear_denoms(Q)
+ 
+     if Q.degree() <= 1:
+diff --git a/sympy/polys/tests/test_partfrac.py b/sympy/polys/tests/test_partfrac.py
+index 707fb45..5a01b51 100644
+--- a/sympy/polys/tests/test_partfrac.py
++++ b/sympy/polys/tests/test_partfrac.py
+@@ -61,6 +61,15 @@ def test_apart_symbolic():
+         1/((a - c)*(b - c)*(c + x)) - 1/((a - b)*(b - c)*(b + x)) + \
+         1/((a - b)*(a - c)*(a + x))
+ 
++    a_real = Symbol('a', real=True)
++    t_nonnegative = Symbol('t', real=True, negative=False)
++    f = a_real*(-t_nonnegative + (-t_nonnegative + 1)*(2*t_nonnegative - 1)) \
++        /(2*t_nonnegative - 1)
++    result = apart(f, t_nonnegative)
++    assert together(result - (-a_real*t_nonnegative + a_real/2 -
++        a_real/(2*(2*t_nonnegative - 1)))) == 0
++    assert result.subs(a_real, 1) == apart(f.subs(a_real, 1), t_nonnegative)
++
+ 
+ def test_apart_extension():
+     f = 2/(x**2 + 1)

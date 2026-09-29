@@ -1,0 +1,42 @@
+diff --git a/lib/matplotlib/tests/test_widgets.py b/lib/matplotlib/tests/test_widgets.py
+index a19770e..96bc1c2 100644
+--- a/lib/matplotlib/tests/test_widgets.py
++++ b/lib/matplotlib/tests/test_widgets.py
+@@ -1120,6 +1120,22 @@ def test_range_slider(orientation):
+     assert_allclose(slider.val, [0.1, 0.34])
+ 
+ 
++@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
++def test_range_slider_equal_endpoints(orientation):
++    fig, ax = plt.subplots()
++    slider = widgets.RangeSlider(
++        ax=ax, label="", valmin=0.0, valmax=1.0, orientation=orientation,
++        valinit=[0.5, 0.5]
++    )
++    assert_allclose(slider.val, [0.5, 0.5])
++    assert_allclose(slider.poly.xy[0], slider.poly.xy[-1])
++
++    slider.set_val([0.2, 0.8])
++    assert_allclose(slider.val, [0.2, 0.8])
++    slider.set_val([0.5, 0.5])
++    assert_allclose(slider.val, [0.5, 0.5])
++
++
+ def check_polygon_selector(event_sequence, expected_result, selections_count,
+                            **kwargs):
+     """
+diff --git a/lib/matplotlib/widgets.py b/lib/matplotlib/widgets.py
+index da5b40a..2374419 100644
+--- a/lib/matplotlib/widgets.py
++++ b/lib/matplotlib/widgets.py
+@@ -898,6 +898,10 @@ class RangeSlider(SliderBase):
+         val[0] = self._min_in_bounds(val[0])
+         val[1] = self._max_in_bounds(val[1])
+         xy = self.poly.xy
++        if len(xy) == 4:
++            # axvspan/axhspan return four vertices when the span is degenerate.
++            # Add the closing vertex expected by the updates below.
++            xy = np.concatenate([xy, [xy[0]]])
+         if self.orientation == "vertical":
+             xy[0] = .25, val[0]
+             xy[1] = .25, val[1]

@@ -1,0 +1,51 @@
+diff --git a/src/flask/config.py b/src/flask/config.py
+index d4fc310..5fd4367 100644
+--- a/src/flask/config.py
++++ b/src/flask/config.py
+@@ -234,6 +234,7 @@ class Config(dict):
+         filename: str,
+         load: t.Callable[[t.IO[t.Any]], t.Mapping],
+         silent: bool = False,
++        mode: str = "r",
+     ) -> bool:
+         """Update the values in the config from a file that is loaded
+         using the ``load`` parameter. The loaded data is passed to the
+@@ -254,6 +255,8 @@ class Config(dict):
+         :type load: ``Callable[[Reader], Mapping]`` where ``Reader``
+             implements a ``read`` method.
+         :param silent: Ignore the file if it doesn't exist.
++        :param mode: The mode to open the file in. Use ``"b"`` or ``"rb"``
++            to open it in binary mode; the default is ``"r"``.
+         :return: ``True`` if the file was loaded successfully.
+ 
+         .. versionadded:: 2.0
+@@ -261,7 +264,7 @@ class Config(dict):
+         filename = os.path.join(self.root_path, filename)
+ 
+         try:
+-            with open(filename) as f:
++            with open(filename, mode="rb" if mode == "b" else mode) as f:
+                 obj = load(f)
+         except OSError as e:
+             if silent and e.errno in (errno.ENOENT, errno.EISDIR):
+diff --git a/tests/test_config.py b/tests/test_config.py
+index 76c5d27..f3ea6e6 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -37,6 +37,16 @@ def test_config_from_file():
+     common_object_test(app)
+ 
+ 
++def test_config_from_file_binary_mode(tmp_path):
++    path = tmp_path / "config"
++    path.write_bytes(b"config data")
++
++    app = flask.Flask(__name__)
++    app.config.from_file(str(path), load=lambda f: {"TEST_KEY": f.read()}, mode="b")
++
++    assert app.config["TEST_KEY"] == b"config data"
++
++
+ def test_from_prefixed_env(monkeypatch):
+     monkeypatch.setenv("FLASK_STRING", "value")
+     monkeypatch.setenv("FLASK_BOOL", "true")

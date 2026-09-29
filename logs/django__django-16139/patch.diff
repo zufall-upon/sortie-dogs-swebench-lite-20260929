@@ -1,0 +1,71 @@
+diff --git a/django/contrib/auth/forms.py b/django/contrib/auth/forms.py
+index b3cfc67..c5fd364 100644
+--- a/django/contrib/auth/forms.py
++++ b/django/contrib/auth/forms.py
+@@ -1,6 +1,7 @@
+ import unicodedata
+ 
+ from django import forms
++from django.contrib.admin.utils import quote
+ from django.contrib.auth import authenticate, get_user_model, password_validation
+ from django.contrib.auth.hashers import UNUSABLE_PASSWORD_PREFIX, identify_hasher
+ from django.contrib.auth.models import User
+@@ -163,7 +164,10 @@ class UserChangeForm(forms.ModelForm):
+         super().__init__(*args, **kwargs)
+         password = self.fields.get("password")
+         if password:
+-            password.help_text = password.help_text.format("../password/")
++            password_change_url = "../password/"
++            if self.instance.pk is not None:
++                password_change_url = "../../%s/password/" % quote(self.instance.pk)
++            password.help_text = password.help_text.format(password_change_url)
+         user_permissions = self.fields.get("user_permissions")
+         if user_permissions:
+             user_permissions.queryset = user_permissions.queryset.select_related(
+diff --git a/tests/admin_views/tests.py b/tests/admin_views/tests.py
+index 9796703..ca199ef 100644
+--- a/tests/admin_views/tests.py
++++ b/tests/admin_views/tests.py
+@@ -7073,6 +7073,42 @@ class UserAdminTest(TestCase):
+         self.assertContains(response, "&quot;obj&quot;: &quot;newuser&quot;")
+         self.assertContains(response, "&quot;action&quot;: &quot;change&quot;")
+ 
++    def test_password_change_link_with_to_field(self):
++        user = User.objects.get(username="changeuser")
++        change_urls = (
++            reverse("admin:auth_user_change", args=(user.pk,)),
++            "%s?%s=username"
++            % (
++                reverse("admin:auth_user_change", args=(user.username,)),
++                TO_FIELD_VAR,
++            ),
++        )
++        for change_url in change_urls:
++            with self.subTest(change_url=change_url):
++                if TO_FIELD_VAR in change_url:
++                    with mock.patch.object(
++                        site._registry[User],
++                        "to_field_allowed",
++                        return_value=True,
++                    ):
++                        response = self.client.get(change_url)
++                else:
++                    response = self.client.get(change_url)
++                self.assertEqual(response.status_code, 200)
++                match = re.search(
++                    rb'<a href="([^"]+)">this form</a>', response.content
++                )
++                self.assertIsNotNone(match)
++                password_url = urljoin(
++                    response.request["PATH_INFO"], match[1].decode()
++                )
++                expected_url = reverse(
++                    "admin:auth_user_password_change", args=(user.pk,)
++                )
++                self.assertEqual(urlparse(password_url).path, expected_url)
++                password_response = self.client.get(password_url)
++                self.assertEqual(password_response.status_code, 200)
++
+     def test_user_fk_delete_popup(self):
+         """
+         User deletion through a FK popup should return the appropriate

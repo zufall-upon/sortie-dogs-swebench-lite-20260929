@@ -1,0 +1,70 @@
+diff --git a/sphinx/util/rst.py b/sphinx/util/rst.py
+index 7a15383..f2aef4a 100644
+--- a/sphinx/util/rst.py
++++ b/sphinx/util/rst.py
+@@ -25,7 +25,7 @@ except ImportError:
+ 
+ logger = logging.getLogger(__name__)
+ 
+-docinfo_re = re.compile(':\\w+:.*?')
++docinfo_re = re.compile(r':\w+:(?: +|$)')
+ symbols_re = re.compile(r'([!-\-/:-@\[-`{-~])')  # symbols without dot(0x2e)
+ SECTIONING_CHARS = ['=', '-', '~']
+ 
+diff --git a/tests/roots/test-prolog/role_title/conf.py b/tests/roots/test-prolog/role_title/conf.py
+new file mode 100644
+index 0000000..084ac8e
+--- /dev/null
++++ b/tests/roots/test-prolog/role_title/conf.py
+@@ -0,0 +1,3 @@
++project = 'rst_prolog heading test'
++master_doc = 'index'
++rst_prolog = '.. |psf| replace:: Python Software Foundation'
+diff --git a/tests/roots/test-prolog/role_title/index.rst b/tests/roots/test-prolog/role_title/index.rst
+new file mode 100644
+index 0000000..100f201
+--- /dev/null
++++ b/tests/roots/test-prolog/role_title/index.rst
+@@ -0,0 +1,6 @@
++Index
++=====
++
++.. toctree::
++
++   mypackage
+diff --git a/tests/roots/test-prolog/role_title/mypackage.rst b/tests/roots/test-prolog/role_title/mypackage.rst
+new file mode 100644
+index 0000000..928fbbe
+--- /dev/null
++++ b/tests/roots/test-prolog/role_title/mypackage.rst
+@@ -0,0 +1,2 @@
++:mod:`mypackage2`
++=================
+diff --git a/tests/test_markup.py b/tests/test_markup.py
+index 01e3dd8..81d44a8 100644
+--- a/tests/test_markup.py
++++ b/tests/test_markup.py
+@@ -541,6 +541,23 @@ def test_rst_prolog(app, status, warning):
+     assert not md.rawsource.endswith('*Good-bye world*.\n')
+ 
+ 
++@pytest.mark.sphinx('html', testroot='prolog/role_title')
++def test_rst_prolog_domain_role_heading(app):
++    app.builder.build_all()
++
++    doctree = app.env.get_doctree('mypackage')
++    section = next(doctree.findall(nodes.section))
++    assert_node(section[0], nodes.title)
++    assert section[0].astext() == 'mypackage2'
++
++    index = (app.outdir / 'index.html').read_text(encoding='utf8')
++    toctree = index.split('<div class="toctree-wrapper compound">', 1)[1].split('</div>', 1)[0]
++    toctree_link = re.search(r'<a\b[^>]*href="mypackage\.html"[^>]*>(.*?)</a>',
++                             toctree, re.DOTALL)
++    assert toctree_link is not None
++    assert 'mypackage2' in toctree_link.group(1)
++
++
+ @pytest.mark.sphinx('dummy', testroot='keep_warnings')
+ def test_keep_warnings_is_True(app, status, warning):
+     app.builder.build_all()

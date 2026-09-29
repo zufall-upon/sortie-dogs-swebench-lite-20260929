@@ -1,0 +1,48 @@
+diff --git a/django/db/models/expressions.py b/django/db/models/expressions.py
+index 8642e1f..efe2c78 100644
+--- a/django/db/models/expressions.py
++++ b/django/db/models/expressions.py
+@@ -981,6 +981,11 @@ class ExpressionWrapper(SQLiteNumericMixin, Expression):
+     def as_sql(self, compiler, connection):
+         return compiler.compile(self.expression)
+ 
++    def select_format(self, compiler, sql, params):
++        if hasattr(self.expression, 'select_format'):
++            return self.expression.select_format(compiler, sql, params)
++        return super().select_format(compiler, sql, params)
++
+     def __repr__(self):
+         return "{}({})".format(self.__class__.__name__, self.expression)
+ 
+diff --git a/django/db/models/sql/where.py b/django/db/models/sql/where.py
+index 50ff13b..34a202c 100644
+--- a/django/db/models/sql/where.py
++++ b/django/db/models/sql/where.py
+@@ -214,6 +214,8 @@ class WhereNode(tree.Node):
+         # Wrap filters with a CASE WHEN expression if a database backend
+         # (e.g. Oracle) doesn't support boolean expression in SELECT or GROUP
+         # BY list.
++        if not sql:
++            sql = '1=1'
+         if not compiler.connection.features.supports_boolean_expr_in_select_clause:
+             sql = f'CASE WHEN {sql} THEN 1 ELSE 0 END'
+         return sql, params
+diff --git a/tests/annotations/tests.py b/tests/annotations/tests.py
+index 62912ee..4dae98d 100644
+--- a/tests/annotations/tests.py
++++ b/tests/annotations/tests.py
+@@ -210,6 +210,14 @@ class NonAggregateAnnotationTestCase(TestCase):
+         self.assertEqual(len(books), Book.objects.count())
+         self.assertTrue(all(not book.selected for book in books))
+ 
++        for condition in (~Q(pk__in=[]), ~Q(pk__in=Book.objects.none())):
++            with self.subTest(condition=condition):
++                books = Book.objects.annotate(
++                    selected=ExpressionWrapper(condition, output_field=BooleanField())
++                )
++                self.assertEqual(len(books), Book.objects.count())
++                self.assertTrue(all(book.selected for book in books))
++
+     def test_empty_queryset_annotation(self):
+         qs = Author.objects.annotate(
+             empty=Subquery(Author.objects.values('id').none())

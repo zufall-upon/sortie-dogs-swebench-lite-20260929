@@ -1,0 +1,25 @@
+diff --git a/sympy/physics/units/tests/test_util.py b/sympy/physics/units/tests/test_util.py
+index ed2f7df..402c6b6 100644
+--- a/sympy/physics/units/tests/test_util.py
++++ b/sympy/physics/units/tests/test_util.py
+@@ -46,6 +46,7 @@ def test_convert_to_quantities():
+     assert convert_to(2*speed_of_light, meter/second) == 599584916*meter/second
+     assert convert_to(day, second) == 86400*second
+     assert convert_to(2*hour, minute) == 120*minute
++    assert convert_to(joule*second, joule) == joule*second
+     assert convert_to(mile, meter) == 201168*meter/125
+     assert convert_to(mile/hour, kilometer/hour) == 25146*kilometer/(15625*hour)
+     assert convert_to(3*newton, meter/second) == 3*newton
+diff --git a/sympy/physics/units/util.py b/sympy/physics/units/util.py
+index b03ed4c..fa72a0a 100644
+--- a/sympy/physics/units/util.py
++++ b/sympy/physics/units/util.py
+@@ -31,6 +31,8 @@ def _get_conversion_matrix_for_expr(expr, target_units, unit_system):
+     exprmat = Matrix([dim_dependencies.get(k, 0) for k in canon_dim_units])
+ 
+     res_exponents = camat.solve_least_squares(exprmat, method=None)
++    if camat * res_exponents != exprmat:
++        return None
+     return res_exponents
+ 
+ 

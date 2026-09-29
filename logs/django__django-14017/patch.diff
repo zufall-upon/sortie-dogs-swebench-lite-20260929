@@ -1,0 +1,103 @@
+diff --git a/django/db/models/query_utils.py b/django/db/models/query_utils.py
+index c957ffa..b15d229 100644
+--- a/django/db/models/query_utils.py
++++ b/django/db/models/query_utils.py
+@@ -41,7 +41,10 @@ class Q(tree.Node):
+ 
+     def _combine(self, other, conn):
+         if not isinstance(other, Q):
+-            raise TypeError(other)
++            if getattr(other, 'conditional', False):
++                other = Q(other)
++            else:
++                raise TypeError(other)
+ 
+         # If the other Q() is empty, ignore it and just use `self`.
+         if not other:
+@@ -85,7 +88,7 @@ class Q(tree.Node):
+         if path.startswith('django.db.models.query_utils'):
+             path = path.replace('django.db.models.query_utils', 'django.db.models')
+         args, kwargs = (), {}
+-        if len(self.children) == 1 and not isinstance(self.children[0], Q):
++        if len(self.children) == 1 and isinstance(self.children[0], tuple):
+             child = self.children[0]
+             kwargs = {child[0]: child[1]}
+         else:
+diff --git a/tests/expressions/tests.py b/tests/expressions/tests.py
+index 08ea0a5..d847280 100644
+--- a/tests/expressions/tests.py
++++ b/tests/expressions/tests.py
+@@ -797,24 +797,38 @@ class BasicExpressionsTests(TestCase):
+     def test_boolean_expression_combined(self):
+         is_ceo = Company.objects.filter(ceo=OuterRef('pk'))
+         is_poc = Company.objects.filter(point_of_contact=OuterRef('pk'))
++        is_ceo_expression = Exists(is_ceo)
++        is_poc_expression = Exists(is_poc)
+         self.gmbh.point_of_contact = self.max
+         self.gmbh.save()
+         self.assertCountEqual(
+-            Employee.objects.filter(Exists(is_ceo) | Exists(is_poc)),
++            Employee.objects.filter(is_ceo_expression | is_poc_expression),
+             [self.example_inc.ceo, self.foobar_ltd.ceo, self.max],
+         )
+         self.assertCountEqual(
+-            Employee.objects.filter(Exists(is_ceo) & Exists(is_poc)),
++            Employee.objects.filter(is_ceo_expression & is_poc_expression),
+             [self.max],
+         )
+         self.assertCountEqual(
+-            Employee.objects.filter(Exists(is_ceo) & Q(salary__gte=30)),
++            Employee.objects.filter(is_ceo_expression & Q(salary__gte=30)),
+             [self.max],
+         )
+         self.assertCountEqual(
+-            Employee.objects.filter(Exists(is_poc) | Q(salary__lt=15)),
++            Employee.objects.filter(is_poc_expression | Q(salary__lt=15)),
+             [self.example_inc.ceo, self.max],
+         )
++        self.assertCountEqual(
++            Employee.objects.filter(Q(salary__gte=30) & is_ceo_expression),
++            [self.max],
++        )
++        self.assertCountEqual(
++            Employee.objects.filter(Q(salary__lt=15) | is_poc_expression),
++            [self.example_inc.ceo, self.max],
++        )
++        self.assertCountEqual(
++            Employee.objects.filter(Q() & is_ceo_expression),
++            [self.example_inc.ceo, self.foobar_ltd.ceo, self.max],
++        )
+ 
+ 
+ class IterableLookupInnerExpressionsTests(TestCase):
+diff --git a/tests/queries/test_q.py b/tests/queries/test_q.py
+index 6dcf36c..d0969f2 100644
+--- a/tests/queries/test_q.py
++++ b/tests/queries/test_q.py
+@@ -1,4 +1,4 @@
+-from django.db.models import F, Q
++from django.db.models import F, Q, Value
+ from django.test import SimpleTestCase
+ 
+ 
+@@ -27,6 +27,20 @@ class QTests(SimpleTestCase):
+     def test_combine_or_both_empty(self):
+         self.assertEqual(Q() | Q(), Q())
+ 
++    def test_combine_conditional_expression(self):
++        q = Q(x=1)
++        expression = Value(True)
++        expected_and = Q(('x', 1), expression)
++        expected_or = Q(('x', 1), expression, _connector=Q.OR)
++
++        self.assertEqual(q & expression, expected_and)
++        self.assertEqual(expression & q, Q(expression, q))
++        self.assertEqual(q | expression, expected_or)
++        self.assertEqual(expression | q, Q(expression, q, _connector=Q.OR))
++
++        self.assertEqual(Q() & expression, Q(expression))
++        self.assertEqual(Q() | expression, Q(expression))
++
+     def test_combine_not_q_object(self):
+         obj = object()
+         q = Q(x=1)
